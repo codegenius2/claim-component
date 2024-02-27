@@ -1,4 +1,4 @@
-// use scrypto::prelude::DIVISIBILITY_MAXIMUM;
+use scrypto::prelude::DIVISIBILITY_NONE;
 use scrypto::prelude::*;
 use scrypto_test::prelude::*;
 use scrypto_unit::*;
@@ -8,7 +8,7 @@ use transaction::prelude::ManifestBuilder;
 fn setup_component_test() {
     let mut test_runner = TestRunnerBuilder::new().without_trace().build();
     let main_account = test_runner.new_allocated_account();
-    setup_component(&main_account, XRD, &mut test_runner);
+    setup_component(&main_account, XRD, XRD, &mut test_runner);
 }
 
 #[test]
@@ -18,13 +18,21 @@ fn add_accounts_rewards_test() {
     let dextr_token = XRD;
     // let dextr_token =
     //     test_runner.create_fungible_resource(dec!("10000"), DIVISIBILITY_MAXIMUM, main_account.2);
-    let component_address = setup_component(&main_account, dextr_token, &mut test_runner);
+    let dextr_admin_token =
+        test_runner.create_fungible_resource(dec!(1), DIVISIBILITY_NONE, main_account.2);
+    let (component_address, _dapp_def_address) = setup_component(
+        &main_account,
+        dextr_token,
+        dextr_admin_token,
+        &mut test_runner,
+    );
     // let test_str2 = r##"{"accounts":[["account_sim1c956qr3kxlgypxwst89j9yf24tjc7zxd4up38x37zr6q4jxdx9rhma","756.94"]],"orders":[{ "pair_address": "DEXTR/XRD", "pair_rewards": [["1303","1153.12"],["1306","14089.93"]]}]}"##;
     let (test_str, account_addresses) = build_accounts_test_str(&mut test_runner);
     println!("Test string: {:?}", test_str);
     let tx_manifest = ManifestBuilder::new()
         .withdraw_from_account(main_account.2.clone(), dextr_token, dec!("2000"))
         .take_all_from_worktop(dextr_token, "dextr_bucket")
+        .create_proof_from_account_of_amount(main_account.2.clone(), dextr_admin_token, 1)
         .with_name_lookup(|builder, lookup| {
             builder.call_method(
                 component_address,
@@ -32,6 +40,7 @@ fn add_accounts_rewards_test() {
                 manifest_args!(String::from(test_str), vec!(lookup.bucket("dextr_bucket"))),
             )
         })
+        .drop_all_proofs()
         .try_deposit_entire_worktop_or_abort(main_account.2.clone(), None)
         .build();
 
@@ -52,13 +61,17 @@ fn add_accounts_rewards_test() {
 fn add_orders_rewards_test() {
     let mut test_runner = TestRunnerBuilder::new().without_trace().build();
     let main_account = test_runner.new_allocated_account();
-    let component_address = setup_component(&main_account, XRD, &mut test_runner);
+    let dextr_admin_token =
+        test_runner.create_fungible_resource(dec!(1), DIVISIBILITY_NONE, main_account.2);
+    let (component_address, _dapp_def_address) =
+        setup_component(&main_account, XRD, dextr_admin_token, &mut test_runner);
     // let test_str2 = r##"{"accounts":[["account_sim1c956qr3kxlgypxwst89j9yf24tjc7zxd4up38x37zr6q4jxdx9rhma","756.94"]],"orders":[{ "pair_address": "DEXTR/XRD", "pair_rewards": [["1303","1153.12"],["1306","14089.93"]]}]}"##;
     let test_str = build_orders_test_str(&mut test_runner);
     println!("Test string: {:?}", test_str);
     let tx_manifest = ManifestBuilder::new()
         .withdraw_from_account(main_account.2.clone(), XRD, dec!("2000"))
         .take_all_from_worktop(XRD, "xrd_bucket")
+        .create_proof_from_account_of_amount(main_account.2.clone(), dextr_admin_token, 1)
         .with_name_lookup(|builder, lookup| {
             builder.call_method(
                 component_address,
@@ -66,6 +79,7 @@ fn add_orders_rewards_test() {
                 manifest_args!(String::from(test_str), vec!(lookup.bucket("xrd_bucket"))),
             )
         })
+        .drop_all_proofs()
         .try_deposit_entire_worktop_or_abort(main_account.2.clone(), None)
         .build();
 
@@ -83,13 +97,16 @@ fn add_orders_rewards_test() {
 pub fn claim_accounts_rewards_test() {
     let mut test_runner = TestRunnerBuilder::new().without_trace().build();
     let main_account = test_runner.new_allocated_account();
-    // test_runner.load_account_from_faucet(account1);
-    let component_address = setup_component(&main_account, XRD, &mut test_runner);
+    let dextr_admin_token =
+        test_runner.create_fungible_resource(dec!(1), DIVISIBILITY_NONE, main_account.2);
+    let (component_address, _dapp_def_address) =
+        setup_component(&main_account, XRD, dextr_admin_token, &mut test_runner);
     let (test_str, test_accounts) = build_accounts_test_str(&mut test_runner);
     println!("Test string: {:?}", test_str);
     let tx_manifest = ManifestBuilder::new()
         .withdraw_from_account(main_account.2, XRD, dec!("2000"))
         .take_all_from_worktop(XRD, "xrd_bucket")
+        .create_proof_from_account_of_amount(main_account.2.clone(), dextr_admin_token, 1)
         .with_name_lookup(|builder, lookup| {
             builder.call_method(
                 component_address,
@@ -100,6 +117,7 @@ pub fn claim_accounts_rewards_test() {
                 ),
             )
         })
+        .drop_all_proofs()
         .try_deposit_entire_worktop_or_abort(main_account.2, None)
         .build();
 
@@ -163,6 +181,141 @@ pub fn claim_accounts_rewards_test() {
             account_address_string, account_balance
         );
     }
+}
+
+#[test]
+pub fn change_dapp_def_test() {
+    let mut test_runner = TestRunnerBuilder::new().without_trace().build();
+    let main_account = test_runner.new_allocated_account();
+    let dextr_admin_token =
+        test_runner.create_fungible_resource(dec!(1), DIVISIBILITY_NONE, main_account.2);
+    let (_component_address, dapp_def_address) =
+        setup_component(&main_account, XRD, dextr_admin_token, &mut test_runner);
+
+    // change metadata with authorisation - should succeed
+    let tx_manifest = ManifestBuilder::new()
+        .create_proof_from_account_of_amount(main_account.2.clone(), dextr_admin_token, 1)
+        .set_metadata(dapp_def_address, "name", "DeXter Claim Component 2")
+        .drop_all_proofs()
+        .try_deposit_entire_worktop_or_abort(main_account.2, None)
+        .build();
+    let receipt = test_runner.execute_manifest_ignoring_fee(
+        tx_manifest,
+        vec![NonFungibleGlobalId::from_public_key(&main_account.0)],
+    );
+    // println!("Receipt: {:?}", receipt);
+    let _result = receipt.expect_commit_success();
+
+    // change metadata without authorisation = should fail
+    let tx_manifest = ManifestBuilder::new()
+        .set_metadata(dapp_def_address, "name", "DeXter Claim Component 2")
+        .try_deposit_entire_worktop_or_abort(main_account.2, None)
+        .build();
+    let receipt = test_runner.execute_manifest_ignoring_fee(
+        tx_manifest,
+        vec![NonFungibleGlobalId::from_public_key(&main_account.0)],
+    );
+    // println!("Receipt: {:?}", receipt);
+    let _result = receipt.expect_commit_failure();
+}
+
+#[test]
+pub fn change_admin_role_test() {
+    let mut test_runner = TestRunnerBuilder::new().without_trace().build();
+    let main_account = test_runner.new_allocated_account();
+    let _second_account = test_runner.new_allocated_account();
+    let dextr_admin_token =
+        test_runner.create_fungible_resource(dec!(2), DIVISIBILITY_NONE, main_account.2);
+    let (component_address, _dapp_def_address) =
+        setup_component(&main_account, XRD, dextr_admin_token, &mut test_runner);
+
+    // change admin role without authorisation - should fail
+    let tx_manifest = ManifestBuilder::new()
+        .set_main_role(
+            component_address.clone(),
+            "admin",
+            rule!(require_amount(2, dextr_admin_token.clone())),
+        )
+        .try_deposit_entire_worktop_or_abort(main_account.2, None)
+        .build();
+    let receipt = test_runner.execute_manifest_ignoring_fee(
+        tx_manifest,
+        vec![NonFungibleGlobalId::from_public_key(&main_account.0)],
+    );
+    // println!("Receipt: {:?}", receipt);
+    let _result = receipt.expect_commit_failure();
+
+    // change admin role with authorisation - should succeed
+    let tx_manifest = ManifestBuilder::new()
+        .create_proof_from_account_of_amount(main_account.2.clone(), dextr_admin_token, 1)
+        .set_main_role(
+            component_address.clone(),
+            "admin",
+            rule!(require_amount(2, dextr_admin_token.clone())),
+        )
+        .drop_all_proofs()
+        .try_deposit_entire_worktop_or_abort(main_account.2, None)
+        .build();
+    let receipt = test_runner.execute_manifest_ignoring_fee(
+        tx_manifest,
+        vec![NonFungibleGlobalId::from_public_key(&main_account.0)],
+    );
+    // println!("Receipt: {:?}", receipt);
+    let _result = receipt.expect_commit_success();
+
+    // try to run admins-only protected method - should fail
+    let (test_str, _test_accounts) = build_accounts_test_str(&mut test_runner);
+    let tx_manifest = ManifestBuilder::new()
+        .withdraw_from_account(main_account.2, XRD, dec!("2000"))
+        .take_all_from_worktop(XRD, "xrd_bucket")
+        .create_proof_from_account_of_amount(main_account.2.clone(), dextr_admin_token, 1)
+        .with_name_lookup(|builder, lookup| {
+            builder.call_method(
+                component_address,
+                "add_rewards",
+                manifest_args!(
+                    String::from(test_str.trim()),
+                    vec!(lookup.bucket("xrd_bucket"))
+                ),
+            )
+        })
+        .drop_all_proofs()
+        .try_deposit_entire_worktop_or_abort(main_account.2, None)
+        .build();
+
+    let receipt = test_runner.execute_manifest_ignoring_fee(
+        tx_manifest,
+        vec![NonFungibleGlobalId::from_public_key(&main_account.0)],
+    );
+    println!("Receipt: {:?}", receipt);
+    let _result = receipt.expect_commit_failure();
+
+    // try to run admins-only protected method again with proper authorisation - should succeed
+    let (test_str, _test_accounts) = build_accounts_test_str(&mut test_runner);
+    let tx_manifest = ManifestBuilder::new()
+        .withdraw_from_account(main_account.2, XRD, dec!("2000"))
+        .take_all_from_worktop(XRD, "xrd_bucket")
+        .create_proof_from_account_of_amount(main_account.2.clone(), dextr_admin_token, 2)
+        .with_name_lookup(|builder, lookup| {
+            builder.call_method(
+                component_address,
+                "add_rewards",
+                manifest_args!(
+                    String::from(test_str.trim()),
+                    vec!(lookup.bucket("xrd_bucket"))
+                ),
+            )
+        })
+        .drop_all_proofs()
+        .try_deposit_entire_worktop_or_abort(main_account.2, None)
+        .build();
+
+    let receipt = test_runner.execute_manifest_ignoring_fee(
+        tx_manifest,
+        vec![NonFungibleGlobalId::from_public_key(&main_account.0)],
+    );
+    // println!("Receipt: {:?}", receipt);
+    let _result = receipt.expect_commit_success();
 }
 
 fn build_accounts_test_str(
@@ -289,8 +442,9 @@ fn build_orders_test_str(
 fn setup_component(
     main_account: &(Secp256k1PublicKey, Secp256k1PrivateKey, ComponentAddress),
     dextr_token: ResourceAddress,
+    dextr_admin_token: ResourceAddress,
     test_runner: &mut TestRunner<NoExtension, InMemorySubstateDatabase>,
-) -> ComponentAddress {
+) -> (ComponentAddress, ComponentAddress) {
     let package_address = test_runner.compile_and_publish(this_package!());
 
     let tx_manifest = ManifestBuilder::new()
@@ -298,7 +452,7 @@ fn setup_component(
             package_address,
             "DexterClaimComponent",
             "new",
-            manifest_args!(dextr_token),
+            manifest_args!(dextr_token, dextr_admin_token),
         )
         .try_deposit_entire_worktop_or_abort(main_account.2, None)
         .build();
@@ -310,7 +464,12 @@ fn setup_component(
     // println!("Receipt: {:?}", receipt);
     let result = receipt.expect_commit_success();
 
+    // println!(
+    //     "New component addresses: {:?}",
+    //     result.new_component_addresses()
+    // );
     let claim_component_address = result.new_component_addresses()[0];
+    let dapp_def_address = result.new_component_addresses()[1];
     // println!("Claim component address: {:?}", claim_component_address);
-    claim_component_address
+    (claim_component_address, dapp_def_address)
 }

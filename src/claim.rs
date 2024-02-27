@@ -49,8 +49,19 @@ pub struct JsonPairOrderRewards {
 
 #[blueprint]
 mod dexter_claim_component {
+    enable_method_auth! {
+        roles {
+            super_admin => updatable_by: [OWNER];
+            admin => updatable_by: [OWNER];
+        },
+        methods {
+            add_rewards => restrict_to: [admin];
+            claim_rewards => PUBLIC;
+        }
+    }
     struct DexterClaimComponent {
         dextr_token_address: String,
+        admin_token_address: ResourceAddress,
         claim_accounts: KeyValueStore<String, HashMap<String, HashMap<String, Decimal>>>,
         claim_orders: KeyValueStore<String, Decimal>, // KVS<Order receipt resource address +"#"+ Order recipt local id, Reward Amount>
         claim_vaults: KeyValueStore<String, Vault>,
@@ -58,30 +69,64 @@ mod dexter_claim_component {
     }
 
     impl DexterClaimComponent {
-        pub fn new(dextr_token_address: ResourceAddress) -> Global<DexterClaimComponent> {
-            // let (address_reservation, component_address) =
-            //     Runtime::allocate_component_address(<DexterClaimComponent>::blueprint_id());
+        pub fn new(
+            dextr_token_address: ResourceAddress,
+            admin_token_address: ResourceAddress,
+        ) -> Global<DexterClaimComponent> {
+            let (address_reservation, component_address) =
+                Runtime::allocate_component_address(<DexterClaimComponent>::blueprint_id());
             // let require_component_rule = rule!(require(global_caller(component_address)));
+            // set up a dapp definition account for the pair
+            let dapp_def_account =
+                Blueprint::<Account>::create_advanced(OwnerRole::Updatable(rule!(allow_all)), None);
+            let dapp_def_address = GlobalAddress::from(dapp_def_account.address());
+            // metadata and owner for the dapp definition are added later in the function after the entities are created.
+
             let new_component = Self {
                 dextr_token_address: DexterClaimComponent::create_resource_address_string(
                     &dextr_token_address,
-                    "stokenet",
+                    "local",
                 ),
+                admin_token_address,
                 claim_accounts: KeyValueStore::new(),
                 claim_orders: KeyValueStore::new(),
                 claim_vaults: KeyValueStore::new(),
-                env: String::from("stokenet"),
+                env: String::from("local"),
             }
             .instantiate()
-            .prepare_to_globalize(OwnerRole::Updatable(AccessRule::AllowAll))
+            .prepare_to_globalize(OwnerRole::Updatable(rule!(require(admin_token_address.clone()))))
+            .with_address(address_reservation)
+            .roles(roles!(
+                super_admin => rule!(require(admin_token_address.clone()));
+                admin => rule!(require(admin_token_address.clone()));
+            ))
             .metadata(metadata! {
               init {
                 "name" => String::from("DeXter Claim Component"), updatable;
                 "description" => String::from("DeXter Liquidity and Trading Rewards Claim Component."), updatable;
                 "tags" => vec!["DeXter"], updatable;
+                "dapp_definitions" => vec![dapp_def_address.clone()], updatable;
               }
             })
             .globalize();
+
+            // set dapp definition metadata and owner
+            dapp_def_account.set_metadata("account_type", String::from("dapp definition"));
+            dapp_def_account.set_metadata("name", format!("DeXter Claim Component"));
+            dapp_def_account.set_metadata(
+                "description",
+                format!("A component to facilitate the distribution of rewards to the DeXter community."),
+            );
+            dapp_def_account.set_metadata(
+                "icon_url",
+                Url::of("https://dexteronradix.com/logo_icon.svg"),
+            );
+            dapp_def_account.set_metadata(
+                "claimed_entities",
+                vec![GlobalAddress::from(component_address.clone())],
+            );
+            dapp_def_account.set_owner_role(rule!(require(admin_token_address.clone())));
+
             new_component
         }
 
@@ -151,13 +196,14 @@ mod dexter_claim_component {
             &mut self,
             accounts: Vec<ComponentAddress>,
             orders_proofs: Vec<NonFungibleProof>,
-        ) -> Vec<Bucket> {
+        ) -> Bucket {
             info!("Starting to claim rewards!");
-            let mut returned_buckets: Vec<Bucket> = vec![];
             let mut accounts_to_remove: Vec<String> = vec![];
             for account in accounts {
+                let mut account_returned_buckets: Vec<Bucket> = vec![];
                 let account_address_string =
                     DexterClaimComponent::create_component_address_string(&account, &self.env);
+                let mut global_account: Global<Account> = account.into();
                 if let Some(account_data) = self.claim_accounts.get(&account_address_string) {
                     info!(
                         "Claiming rewards for account: {} rewards: {:?}",
@@ -172,14 +218,14 @@ mod dexter_claim_component {
                                     token_address_string.clone(),
                                     &self.env,
                                 );
-                            if returned_buckets
+                            if account_returned_buckets
                                 .iter()
                                 .find(|bucket| bucket.resource_address() == token_address)
                                 .is_none()
                             {
-                                returned_buckets.push(Bucket::new(token_address));
+                                account_returned_buckets.push(Bucket::new(token_address));
                             }
-                            let token_bucket = returned_buckets.iter_mut().find(|bucket| {bucket.resource_address() == token_address}).expect(&format!("Could not find return bucket for token with resource address: {:?}", token_address));
+                            let token_bucket = account_returned_buckets.iter_mut().find(|bucket| {bucket.resource_address() == token_address}).expect(&format!("Could not find account return bucket for token with resource address: {:?}", token_address));
                             // let token_bucket = returned_buckets.entry(token_address).or_insert(Bucket::new(token_address));
                             info!(
                                 "Token bucket amount before taking out reward: {:?}",
@@ -207,6 +253,7 @@ mod dexter_claim_component {
                             );
                         }
                     }
+                    global_account.try_deposit_batch_or_abort(account_returned_buckets, None);
                     accounts_to_remove.push(account_address_string);
                 }
             }
@@ -217,38 +264,10 @@ mod dexter_claim_component {
             info!("Handled accounts claims");
 
             info!("Starting to handle order claims");
-            if returned_buckets
-                .iter()
-                .find(|bucket| {
-                    let bucket_address_string =
-                        DexterClaimComponent::create_resource_address_string(
-                            &bucket.resource_address(),
-                            &self.env,
-                        );
-                    bucket_address_string == self.dextr_token_address
-                })
-                .is_none()
-            {
-                returned_buckets.push(Bucket::new(
-                    DexterClaimComponent::create_resource_address_from_string(
-                        self.dextr_token_address.clone(),
-                        &self.env,
-                    ),
-                ));
-            }
-            let dextr_return_bucket = returned_buckets
-                .iter_mut()
-                .find(|bucket| {
-                    let bucket_address_string =
-                        DexterClaimComponent::create_resource_address_string(
-                            &bucket.resource_address(),
-                            &self.env,
-                        );
-                    bucket_address_string == self.dextr_token_address
-                })
-                .expect(&format!(
-                    "Could not find return bucket for dextr token with resource address: {:?}",
-                    self.dextr_token_address
+            let mut dextr_return_bucket =
+                Bucket::new(DexterClaimComponent::create_resource_address_from_string(
+                    self.dextr_token_address.clone(),
+                    &self.env,
                 ));
             let mut orders_to_remove: Vec<String> = vec![];
             if let Some(mut dextr_vault) = self.claim_vaults.get_mut(&self.dextr_token_address) {
@@ -277,7 +296,7 @@ mod dexter_claim_component {
             for order in orders_to_remove {
                 self.claim_orders.remove(&order);
             }
-            returned_buckets
+            dextr_return_bucket
         }
 
         fn parse_rewards_data(&self, rewards_data_str: String) -> JsonRewardsData {
