@@ -47,7 +47,15 @@ pub struct JsonPairOrderRewards {
     pub pair_rewards: Vec<(u64, Decimal)>,
 }
 
+#[derive(ScryptoSbor, Clone, Debug, NonFungibleData)]
+pub struct AccountRewardsData {
+    pub account_address: String,
+    #[mutable]
+    pub rewards: HashMap<String, HashMap<String, Decimal>> // HashMap<Reward Name, HashMap<Token Address, Token Reward>>
+}
+
 #[blueprint]
+#[types(AccountRewardsData, String, Decimal, Vault)]
 mod dexter_claim_component {
     enable_method_auth! {
         roles {
@@ -63,6 +71,7 @@ mod dexter_claim_component {
     struct DexterClaimComponent {
         dextr_token_address: String,
         admin_token_address: ResourceAddress,
+        account_rewards_nft_manager: ResourceManager,
         claim_accounts: KeyValueStore<String, HashMap<String, HashMap<String, Decimal>>>,
         claim_orders: KeyValueStore<String, Decimal>, // KVS<Order receipt resource address +"#"+ Order recipt local id, Reward Amount>
         claim_vaults: KeyValueStore<String, Vault>,
@@ -76,12 +85,37 @@ mod dexter_claim_component {
         ) -> Global<DexterClaimComponent> {
             let (address_reservation, component_address) =
                 Runtime::allocate_component_address(<DexterClaimComponent>::blueprint_id());
-            // let require_component_rule = rule!(require(global_caller(component_address)));
+            let require_component_rule = rule!(require(global_caller(component_address)));
             // set up a dapp definition account for the pair
             let dapp_def_account =
                 Blueprint::<Account>::create_advanced(OwnerRole::Updatable(rule!(allow_all)), None);
             let dapp_def_address = GlobalAddress::from(dapp_def_account.address());
             // metadata and owner for the dapp definition are added later in the function after the entities are created.
+
+            let account_rewards_nft_manager = 
+                ResourceBuilder::new_string_non_fungible_with_registered_type::<AccountRewardsData>(OwnerRole::Updatable(rule!(require(admin_token_address.clone()))))
+                .metadata(metadata! {
+                    init{
+                        "name" => "DeXter Rewards NFT", updatable;
+                        "description" => "An NFT that keeps track of DeXter rewards related to an account. Although the NFT can be transferred between accounts, the rewards in this NFT will always relate to the specified account.", updatable;
+                        "icon_url" => Url::of("https://dexteronradix.com/logo_icon.svg"), updatable;
+                        "tags" => vec!["DeXter"], updatable;
+                        "dapp_definitions" => vec![dapp_def_address.clone()], updatable;
+                    }
+                })
+                .non_fungible_data_update_roles(non_fungible_data_update_roles! {
+                    non_fungible_data_updater => require_component_rule.clone();
+                    non_fungible_data_updater_updater => rule!(deny_all);
+                })
+                .mint_roles(mint_roles! {
+                    minter => require_component_rule.clone();
+                    minter_updater => rule!(deny_all);
+                })
+                .burn_roles(burn_roles! {
+                    burner => require_component_rule.clone();
+                    burner_updater => rule!(deny_all);
+                })
+                .create_with_no_initial_supply();
 
             let new_component = Self {
                 dextr_token_address: DexterClaimComponent::create_resource_address_string(
@@ -89,6 +123,7 @@ mod dexter_claim_component {
                     "stokenet",
                 ),
                 admin_token_address,
+                account_rewards_nft_manager,
                 claim_accounts: KeyValueStore::new(),
                 claim_orders: KeyValueStore::new(),
                 claim_vaults: KeyValueStore::new(),
@@ -124,7 +159,7 @@ mod dexter_claim_component {
             );
             dapp_def_account.set_metadata(
                 "claimed_entities",
-                vec![GlobalAddress::from(component_address.clone())],
+                vec![GlobalAddress::from(component_address.clone()), account_rewards_nft_manager.address().into()],
             );
             dapp_def_account.set_owner_role(rule!(require(admin_token_address.clone())));
 
@@ -560,29 +595,52 @@ mod dexter_claim_component {
             }
             // process accounts rewards
             for account_data in rewards_data.accounts.clone() {
-                let mut skip_rest = false;
+                // let mut account_nft_exists = true;
+                let mut skip_account = false;
                 let account_address_str = account_data.account_address.clone();
                 info!("Account address string: {:?}", account_address_str);
-                let _account_address = DexterClaimComponent::create_component_address_from_string(
-                    account_address_str.clone(),
-                    &self.env,
-                );
+                
                 info!("Account address: {:?}", _account_address);
-                let mut existing_account_data: HashMap<String, HashMap<String, Decimal>>;
-                if self.claim_accounts.get(&account_address_str).is_some() {
-                    existing_account_data = self
-                        .claim_accounts
-                        .get(&account_address_str)
-                        .unwrap()
-                        .to_owned();
-                } else if !add {
-                    skip_rest = true;
-                    existing_account_data = HashMap::new();
+                let account_id = NonFungibleLocalId::string(account_address_str.clone()).expect(&format!("Could not convert {} into a valid NFT ID", account_address_str.clone()));
+                let existing_account_data: AccountRewardsData;
+                if self.account_rewards_nft_manager.non_fungible_exists(&account_id) {
+                    existing_account_data = self.account_rewards_nft_manager.get_non_fungible_data(&account_id)
                 } else {
-                    info!("Inserting new account...");
-                    existing_account_data = HashMap::new();
+                    // account_nft_exists = false;
+                    existing_account_data = AccountRewardsData {
+                        account_address: account_address_str.clone(),
+                        rewards: HashMap::new()
+                    };
+                    if add {
+                        let new_nft = self.account_rewards_nft_manager.mint_non_fungible(&account_id, existing_account_data.clone());
+                        let account_address = DexterClaimComponent::create_component_address_from_string(
+                            account_address_str.clone(),
+                            &self.env,
+                        );
+                        let mut global_account: Global<Account> = account_address.into();
+                        if let Some(returned_nft) = global_account.try_deposit_or_refund(new_nft, None) {
+                            returned_nft.burn();
+                            skip_account = true;
+                        };
+                    } else {
+                        skip_account = true;
+                    }
                 }
-                if !skip_rest {
+                let mut existing_account_rewards = existing_account_data.rewards;
+                // if self.claim_accounts.get(&account_address_str).is_some() {
+                //     existing_account_data = self
+                //         .claim_accounts
+                //         .get(&account_address_str)
+                //         .unwrap()
+                //         .to_owned();
+                // } else if !add {
+                //     skip_rest = true;
+                //     existing_account_data = HashMap::new();
+                // } else {
+                //     info!("Inserting new account...");
+                //     existing_account_data = HashMap::new();
+                // }
+                if !skip_account {
                     for name_rewards_data in account_data.account_rewards {
                         info!("Name Rewards Data: {:?}", name_rewards_data);
                         let reward_name = names_map
@@ -592,7 +650,7 @@ mod dexter_claim_component {
                                 name_rewards_data.name_id
                             ))
                             .to_owned();
-                        let mut existing_name_data = existing_account_data
+                        let mut existing_name_data = existing_account_rewards
                             .entry(reward_name.clone())
                             .or_insert(HashMap::new())
                             .clone();
@@ -641,17 +699,18 @@ mod dexter_claim_component {
                             info!("Total token reward: {:?}", total_token_change);
                         }
                         if existing_name_data.len() > 0 {
-                            existing_account_data
+                            existing_account_rewards
                                 .insert(reward_name, existing_name_data.to_owned());
                         } else {
-                            existing_account_data.remove(&reward_name);
+                            existing_account_rewards.remove(&reward_name);
                         }
-                        info!("Existing account data: {:?}", existing_account_data);
+                        info!("Existing account rewards: {:?}", existing_account_rewards);
                     }
-                    // At the moment the gateway does not show an account that has been removed and then later added back again.
-                    // So the component will keep an entry for an account, even if it is empty to make sure it can be picked up by the gateway.
-                    self.claim_accounts
-                        .insert(account_address_str, existing_account_data);
+                    self.account_rewards_nft_manager.update_non_fungible_data(&account_id, "rewards", existing_account_rewards);
+                    // // At the moment the gateway does not show an account that has been removed and then later added back again.
+                    // // So the component will keep an entry for an account, even if it is empty to make sure it can be picked up by the gateway.
+                    // self.claim_accounts
+                    //     .insert(account_address_str, existing_account_data);
                 }
             }
             let mut token_totals_map: HashMap<String, Decimal> = HashMap::new();
