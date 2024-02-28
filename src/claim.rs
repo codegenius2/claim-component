@@ -56,6 +56,7 @@ mod dexter_claim_component {
         },
         methods {
             add_rewards => restrict_to: [admin];
+            remove_rewards => restrict_to: [super_admin];
             claim_rewards => PUBLIC;
         }
     }
@@ -196,6 +197,25 @@ mod dexter_claim_component {
             }
             // comment above out for production
 
+            return_buckets
+        }
+
+        pub fn remove_rewards(&mut self, rewards_data_string: String) -> Vec<Bucket> {
+            let extracted_data = self.parse_rewards_data(rewards_data_string);
+            info!("remove rewards data: {:?}", &extracted_data);
+            let mut token_rewards_removed = self.load_rewards_data(&extracted_data, false);
+            let mut return_buckets: Vec<Bucket> = vec![];
+            for (token_address, amount_to_remove) in token_rewards_removed.drain() {
+                let mut token_vault = self.claim_vaults.get_mut(&token_address).expect(&format!(
+                    "Could not find token vault for token {} to claim removed tokens.",
+                    token_address
+                ));
+                if token_vault.amount() >= amount_to_remove {
+                    return_buckets.push(token_vault.take(amount_to_remove));
+                } else {
+                    panic!("Not enough tokens in claim vault for token {}. Required {:?}, but only found {:?}", token_address.clone(), amount_to_remove.clone(), token_vault.amount());
+                }
+            }
             return_buckets
         }
 
