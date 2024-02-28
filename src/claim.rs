@@ -86,13 +86,13 @@ mod dexter_claim_component {
             let new_component = Self {
                 dextr_token_address: DexterClaimComponent::create_resource_address_string(
                     &dextr_token_address,
-                    "local",
+                    "stokenet",
                 ),
                 admin_token_address,
                 claim_accounts: KeyValueStore::new(),
                 claim_orders: KeyValueStore::new(),
                 claim_vaults: KeyValueStore::new(),
-                env: String::from("local"),
+                env: String::from("stokenet"),
             }
             .instantiate()
             .prepare_to_globalize(OwnerRole::Updatable(rule!(require(admin_token_address.clone()))))
@@ -106,7 +106,7 @@ mod dexter_claim_component {
                 "name" => String::from("DeXter Claim Component"), updatable;
                 "description" => String::from("DeXter Liquidity and Trading Rewards Claim Component."), updatable;
                 "tags" => vec!["DeXter"], updatable;
-                "dapp_definitions" => vec![dapp_def_address.clone()], updatable;
+                "dapp_definition" => dapp_def_address.clone(), updatable;
               }
             })
             .globalize();
@@ -310,7 +310,7 @@ mod dexter_claim_component {
                                 &proof_resource_address,
                                 &self.env,
                             );
-                        order_index_string.push_str("#");
+                        // order_index_string.push_str("#");
                         let order_id_string = order_id.to_string();
                         info!("order_id string: {:?}", order_id_string);
                         order_index_string.push_str(&order_id_string);
@@ -667,6 +667,7 @@ mod dexter_claim_component {
                     let mut order_id_string = pair_address_string.clone();
                     order_id_string.push_str("#");
                     order_id_string.push_str(&order_id.to_string());
+                    order_id_string.push_str("#");
                     info!("Order id string: {:?}", order_id_string);
                     total_orders_reward_amount = total_orders_reward_amount
                         .checked_add(order_reward_amount.clone())
