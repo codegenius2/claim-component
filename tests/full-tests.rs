@@ -27,7 +27,7 @@ fn add_accounts_rewards_test() {
         &mut test_runner,
     );
     // let test_str2 = r##"{"accounts":[["account_sim1c956qr3kxlgypxwst89j9yf24tjc7zxd4up38x37zr6q4jxdx9rhma","756.94"]],"orders":[{ "pair_address": "DEXTR/XRD", "pair_rewards": [["1303","1153.12"],["1306","14089.93"]]}]}"##;
-    let (test_str, account_addresses) = build_accounts_test_str(&mut test_runner);
+    let (test_str, _account_addresses) = build_accounts_test_str(&mut test_runner);
     println!("Test string: {:?}", test_str);
     let tx_manifest = ManifestBuilder::new()
         .withdraw_from_account(main_account.2.clone(), dextr_token, dec!("2000"))
@@ -52,9 +52,11 @@ fn add_accounts_rewards_test() {
     let _result = receipt.expect_commit_success();
     let account_balance = test_runner.get_component_balance(main_account.2.clone(), dextr_token);
     println!("Account balance: {:?}", account_balance);
-
-    let test_account_address = account_addresses[0].clone();
-    println!("Test account address: {:?}", test_account_address);
+    assert!(
+        account_balance == dec!("8840.54"),
+        "Expected Account Balance of 8840.54, but found {:?}",
+        account_balance
+    );
 }
 
 #[test]
@@ -91,6 +93,11 @@ fn add_orders_rewards_test() {
     let _result = receipt.expect_commit_success();
     let account_balance = test_runner.get_component_balance(main_account.2.clone(), XRD);
     println!("Account balance: {:?}", account_balance);
+    assert!(
+        account_balance == dec!("8839.54"),
+        "Expected Account Balance of 8839.54, but found {:?}",
+        account_balance
+    );
 }
 
 #[test]
@@ -134,7 +141,12 @@ pub fn claim_accounts_rewards_test() {
         "Account balance for main account: {:?}",
         main_account_balance
     );
-    for (account_address_string, _) in test_accounts.clone() {
+    assert!(
+        main_account_balance == dec!("8840.54"),
+        "Expected Account Balance of 8840.54, but found {:?}",
+        main_account_balance
+    );
+    for (account_address_string, _, _expected_account_balance) in test_accounts.clone() {
         let account_address =
             ComponentAddress::try_from_hex(&account_address_string).expect(&format!(
                 "Could not convert account address string {} into account address.",
@@ -147,7 +159,7 @@ pub fn claim_accounts_rewards_test() {
         );
     }
 
-    let (test_account_string, test_account_pubkey) = test_accounts[1].clone();
+    let (test_account_string, test_account_pubkey, test_account_balance) = test_accounts[1].clone();
     let test_account_address = GlobalAddress::try_from_hex(&test_account_string).expect(&format!(
         "Could not create account global address from string {}",
         test_account_string
@@ -169,7 +181,21 @@ pub fn claim_accounts_rewards_test() {
 
     println!("Receipt: {:?}", receipt);
     let _result = receipt.expect_commit_success();
-    for (account_address_string, _) in test_accounts.clone() {
+    let test_account_address =
+        ComponentAddress::try_from_hex(&test_account_string).expect(&format!(
+            "Could not convert account address string {} into account address.",
+            test_account_string
+        ));
+    let account_balance = test_runner.get_component_balance(test_account_address, XRD);
+    assert!(
+        account_balance == test_account_balance,
+        "Expected Account Balance of {:?}, but found {:?}",
+        test_account_balance,
+        account_balance
+    );
+    for (account_address_string, _account_pubkey, _expected_account_balance) in
+        test_accounts.clone()
+    {
         let account_address =
             ComponentAddress::try_from_hex(&account_address_string).expect(&format!(
                 "Could not convert account address string {} into account address.",
@@ -320,28 +346,28 @@ pub fn change_admin_role_test() {
 
 fn build_accounts_test_str(
     test_runner: &mut TestRunner<NoExtension, InMemorySubstateDatabase>,
-) -> (String, Vec<(String, Secp256k1PublicKey)>) {
+) -> (String, Vec<(String, Secp256k1PublicKey, Decimal)>) {
     println!("Starting to create test str...");
-    let mut account_addresses: Vec<(String, Secp256k1PublicKey)> = vec![];
+    let mut account_addresses: Vec<(String, Secp256k1PublicKey, Decimal)> = vec![];
     let xrd_string = XRD.to_hex();
     let (pubkey1, _, account1_address) = test_runner.new_allocated_account();
-    test_runner.load_account_from_faucet(account1_address);
+    // test_runner.load_account_from_faucet(account1_address);
     // println!(
     //     "New account created. Pub key: {:?}, Address: {:?}",
     //     pubkey1, account1_address
     // );
     // let account_address_str = Runtime::bech32_encode_address(account_address);
     let account1_address_string = String::from(account1_address.to_hex());
-    account_addresses.push((account1_address_string.clone(), pubkey1));
+    account_addresses.push((account1_address_string.clone(), pubkey1, dec!("10357.79")));
     let (pubkey2, _, account2_address) = test_runner.new_allocated_account();
-    test_runner.load_account_from_faucet(account2_address);
+    // test_runner.load_account_from_faucet(account2_address);
     // println!(
     //     "New account created. Pub key: {:?}, Address: {:?}",
     //     pubkey2, account2_address
     // );
     // let account_address_str = Runtime::bech32_encode_address(account_address);
     let account2_address_string = String::from(account2_address.to_hex());
-    account_addresses.push((account2_address_string.clone(), pubkey2));
+    account_addresses.push((account2_address_string.clone(), pubkey2, dec!("10801.67")));
     let rewards_string = format!(
         r##"
     {{

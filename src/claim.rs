@@ -135,6 +135,7 @@ mod dexter_claim_component {
             rewards_data_string: String,
             rewards_buckets: Vec<Bucket>,
         ) -> Vec<Bucket> {
+            // comment below out for production
             for reward_bucket in rewards_buckets.iter() {
                 let _reward_bucket_address_string =
                     DexterClaimComponent::create_resource_address_string(
@@ -147,9 +148,11 @@ mod dexter_claim_component {
                     reward_bucket.amount()
                 );
             }
+            // comment above out for production
+
             let extracted_data = self.parse_rewards_data(rewards_data_string);
             info!("rewards data: {:?}", &extracted_data);
-            let token_rewards = self.load_rewards_data(&extracted_data);
+            let token_rewards = self.load_rewards_data(&extracted_data, true);
             let mut return_buckets: Vec<Bucket> = vec![];
             for mut token_bucket in rewards_buckets {
                 // let token_bucket_address = token_bucket.resource_address();
@@ -177,6 +180,8 @@ mod dexter_claim_component {
                 }
                 return_buckets.push(token_bucket);
             }
+
+            // comment below out for production
             for return_bucket in return_buckets.iter() {
                 let _return_bucket_address_string =
                     DexterClaimComponent::create_resource_address_string(
@@ -189,6 +194,8 @@ mod dexter_claim_component {
                     return_bucket.amount()
                 );
             }
+            // comment above out for production
+
             return_buckets
         }
 
@@ -515,6 +522,7 @@ mod dexter_claim_component {
         fn load_rewards_data(
             &mut self,
             rewards_data: &JsonRewardsData,
+            add: bool,
         ) -> HashMap<String, Decimal> {
             let mut names_map: HashMap<u64, String> = HashMap::new();
             for name_data in rewards_data.reward_names.clone() {
@@ -527,7 +535,9 @@ mod dexter_claim_component {
                     (token_data.token_address, Decimal::ZERO),
                 );
             }
+            // process accounts rewards
             for account_data in rewards_data.accounts.clone() {
+                let mut skip_rest = false;
                 let account_address_str = account_data.account_address.clone();
                 info!("Account address string: {:?}", account_address_str);
                 let _account_address = DexterClaimComponent::create_component_address_from_string(
@@ -542,60 +552,91 @@ mod dexter_claim_component {
                         .get(&account_address_str)
                         .unwrap()
                         .to_owned();
+                } else if !add {
+                    skip_rest = true;
+                    existing_account_data = HashMap::new();
                 } else {
                     info!("Inserting new account...");
                     existing_account_data = HashMap::new();
                 }
-                for name_rewards_data in account_data.account_rewards {
-                    info!("Name Rewards Data: {:?}", name_rewards_data);
-                    let reward_name = names_map
-                        .get(&name_rewards_data.name_id)
-                        .expect(&format!(
-                            "Could not find reward name with id {} in reward names data.",
-                            name_rewards_data.name_id
-                        ))
-                        .to_owned();
-                    let mut existing_name_data = existing_account_data
-                        .entry(reward_name.clone())
-                        .or_insert(HashMap::new())
-                        .clone();
-                    info!("Existing name data: {:?}", existing_name_data);
-                    for token_reward_data in name_rewards_data.name_rewards {
-                        info!("Token Reward Data: {:?}", token_reward_data);
-                        let tokens_map_data =
-                            tokens_map.get(&token_reward_data.token_id).expect(&format!(
-                                "Could not find token with id {} in tokens data.",
-                                token_reward_data.token_id
-                            ));
-                        info!("Tokens Map data for token: {:?}", tokens_map_data);
-                        let token_address = tokens_map_data.0.clone();
-                        let total_token_reward = tokens_map_data.1 + token_reward_data.token_reward;
-                        tokens_map.insert(
-                            token_reward_data.token_id,
-                            (token_address.clone(), total_token_reward),
-                        );
-                        info!("Total token reward: {:?}", total_token_reward);
-                        let mut existing_token_total = existing_name_data
-                            .entry(token_address.clone())
-                            .or_insert(Decimal::ZERO)
+                if !skip_rest {
+                    for name_rewards_data in account_data.account_rewards {
+                        info!("Name Rewards Data: {:?}", name_rewards_data);
+                        let reward_name = names_map
+                            .get(&name_rewards_data.name_id)
+                            .expect(&format!(
+                                "Could not find reward name with id {} in reward names data.",
+                                name_rewards_data.name_id
+                            ))
+                            .to_owned();
+                        let mut existing_name_data = existing_account_data
+                            .entry(reward_name.clone())
+                            .or_insert(HashMap::new())
                             .clone();
-                        existing_token_total = existing_token_total
-                            .checked_add(token_reward_data.token_reward)
-                            .expect("Could not add new token reward to existing token total");
-                        existing_name_data
-                            .insert(token_address.clone(), existing_token_total.to_owned());
-                        info!("Existing name data (after update) {:?}", existing_name_data);
+                        info!("Existing name data: {:?}", existing_name_data);
+                        for token_reward_data in name_rewards_data.name_rewards {
+                            info!("Token Reward Data: {:?}", token_reward_data);
+                            let tokens_map_data =
+                                tokens_map.get(&token_reward_data.token_id).expect(&format!(
+                                    "Could not find token with id {} in tokens data.",
+                                    token_reward_data.token_id
+                                ));
+                            info!("Tokens Map data for token: {:?}", tokens_map_data);
+
+                            let token_address = tokens_map_data.0.clone();
+
+                            let mut existing_token_total = existing_name_data
+                                .entry(token_address.clone())
+                                .or_insert(Decimal::ZERO)
+                                .clone();
+                            let mut token_change = token_reward_data.token_reward.clone();
+                            if add {
+                                existing_token_total =
+                                    existing_token_total.checked_add(token_change).expect(
+                                        "Could not add new token reward to existing token total",
+                                    );
+                            } else {
+                                token_change =
+                                    existing_token_total.min(token_reward_data.token_reward);
+                                existing_token_total =
+                                    existing_token_total.checked_sub(token_change).expect(
+                                        "Could not remove token reward from existing token total",
+                                    );
+                            }
+                            if existing_token_total > Decimal::ZERO {
+                                existing_name_data
+                                    .insert(token_address.clone(), existing_token_total.to_owned());
+                            } else {
+                                existing_name_data.remove(&token_address.clone());
+                            }
+                            info!("Existing name data (after update) {:?}", existing_name_data);
+                            let total_token_change = tokens_map_data.1 + token_change;
+                            tokens_map.insert(
+                                token_reward_data.token_id,
+                                (token_address.clone(), total_token_change),
+                            );
+                            info!("Total token reward: {:?}", total_token_change);
+                        }
+                        if existing_name_data.len() > 0 {
+                            existing_account_data
+                                .insert(reward_name, existing_name_data.to_owned());
+                        } else {
+                            existing_account_data.remove(&reward_name);
+                        }
+                        info!("Existing account data: {:?}", existing_account_data);
                     }
-                    existing_account_data.insert(reward_name, existing_name_data.to_owned());
-                    info!("Existing account data: {:?}", existing_account_data);
+                    // At the moment the gateway does not show an account that has been removed and then later added back again.
+                    // So the component will keep an entry for an account, even if it is empty to make sure it can be picked up by the gateway.
+                    self.claim_accounts
+                        .insert(account_address_str, existing_account_data);
                 }
-                self.claim_accounts
-                    .insert(account_address_str, existing_account_data);
             }
             let mut token_totals_map: HashMap<String, Decimal> = HashMap::new();
             for value in tokens_map.values() {
                 token_totals_map.insert(value.0.clone(), value.1.clone());
             }
+
+            // process orders rewards
             let mut total_orders_reward_amount = Decimal::ZERO;
             for order_pair_data in &rewards_data.orders {
                 let pair_address_string = order_pair_data.pair_receipt_address.clone();
