@@ -266,7 +266,10 @@ mod dexter_claim_component {
             }
             info!("Before removing accounts");
             for account_to_remove in accounts_to_remove {
-                self.claim_accounts.remove(&account_to_remove);
+                // as a temporary measure, instead of removing account just give it an empty entry. The gateway does not handle removed keys in a kVS well at the moment.
+                self.claim_accounts
+                    .insert(account_to_remove, HashMap::new());
+                // self.claim_accounts.remove(&account_to_remove);
             }
             info!("Handled accounts claims");
 
