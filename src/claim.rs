@@ -630,8 +630,10 @@ mod dexter_claim_component {
                             account_address_str.clone(),
                             &self.env,
                         );
+                        let global_account_address = GlobalAddress::try_from(account_address.clone()).expect("Could not create GlobalAddress from account address.");
                         info!("Account address: {:?}", account_address);
-                        let mut global_account = Global::<Account>::from(account_address.clone());
+                        info!("Global Account address: {:?}", global_account_address);
+                        let mut global_account: Global<Account> = global_account_address.into();
                         // info!("After account var creation");
                         if let Some(returned_nft) = global_account.try_deposit_or_refund(new_nft, None) {
                             info!("Could not deposit nft");
