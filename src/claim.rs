@@ -120,14 +120,14 @@ mod dexter_claim_component {
             let new_component = Self {
                 dextr_token_address: DexterClaimComponent::create_resource_address_string(
                     &dextr_token_address,
-                    "stokenet",
+                    "local",
                 ),
                 admin_token_address,
                 account_rewards_nft_manager,
                 claim_accounts: KeyValueStore::new(),
                 claim_orders: KeyValueStore::new(),
                 claim_vaults: KeyValueStore::new(),
-                env: String::from("stokenet"),
+                env: String::from("local"),
             }
             .instantiate()
             .prepare_to_globalize(OwnerRole::Updatable(rule!(require(admin_token_address.clone()))))
@@ -187,7 +187,16 @@ mod dexter_claim_component {
             // comment above out for production
 
             let extracted_data = self.parse_rewards_data(rewards_data_string);
-            info!("rewards data: {:?}", &extracted_data);
+            // info!("rewards data: {:?}", &extracted_data);
+
+            // testing only - delete below
+            // let account_address_string = extracted_data.accounts[0].account_address.clone();
+            // info!("Account_address string: {:?}", account_address_string);
+            // let account_address = DexterClaimComponent::create_component_address_from_string(account_address_string.clone(), &self.env);
+            // info!("Account address: {:?}", account_address);
+            // let global_account: Global<Account> = account_address.into();
+            // testing only - delete above
+
             let token_rewards = self.load_rewards_data(&extracted_data, true);
             let mut return_buckets: Vec<Bucket> = vec![];
             for mut token_bucket in rewards_buckets {
@@ -374,7 +383,7 @@ mod dexter_claim_component {
             let changed_rewards_data_str = rewards_data_str.replace("'", "\"");
             let extracted_data =
                 json::parse(&changed_rewards_data_str).expect("Invalid JSON specified!");
-            info!("Extracted JSON data: {:?}", extracted_data);
+            // info!("Extracted JSON data: {:?}", extracted_data);
             if let JsonValue::Object(rewards_data_obj) = extracted_data {
                 for (field_key, field_value) in rewards_data_obj.iter() {
                     match field_key {
@@ -410,10 +419,10 @@ mod dexter_claim_component {
                             }
                         }
                         "accounts" => {
-                            info!("Parsing accounts data: {:?}", field_value);
+                            // info!("Parsing accounts data: {:?}", field_value);
                             if let JsonValue::Array(accounts_data) = field_value {
                                 for account_data in accounts_data {
-                                    info!("Parsing account data: {:?}", account_data);
+                                    // info!("Parsing account data: {:?}", account_data);
                                     if let JsonValue::Array(account_base_data) = account_data {
                                         let account_address = self.get_string_value(
                                             &account_base_data[0].clone(),
@@ -424,10 +433,10 @@ mod dexter_claim_component {
                                             account_base_data[1].clone()
                                         {
                                             for name_reward_data in account_name_rewards_data {
-                                                info!(
-                                                    "Parsing name rewards data: {:?}",
-                                                    name_reward_data
-                                                );
+                                                // info!(
+                                                //     "Parsing name rewards data: {:?}",
+                                                //     name_reward_data
+                                                // );
                                                 let name_id = self.get_number_value(
                                                     &name_reward_data[0].clone(),
                                                     "Name Id",
@@ -468,10 +477,10 @@ mod dexter_claim_component {
                                         } else {
                                             panic!("Account rewards per name not specified as an array for account {}.", account_address);
                                         }
-                                        info!(
-                                            "Account extracted data: ({:?}, {:?})",
-                                            account_address, account_name_rewards
-                                        );
+                                        // info!(
+                                        //     "Account extracted data: ({:?}, {:?})",
+                                        //     account_address, account_name_rewards
+                                        // );
                                         result.accounts.push(JsonAccountRewards {
                                             account_address,
                                             account_rewards: account_name_rewards,
@@ -488,18 +497,18 @@ mod dexter_claim_component {
                             }
                         }
                         "orders" => {
-                            info!("Parsing orders data: {:?}", field_value);
+                            // info!("Parsing orders data: {:?}", field_value);
                             if let JsonValue::Array(orders_data) = field_value {
                                 for pair_data_obj in orders_data {
                                     if let JsonValue::Object(pair_data) = pair_data_obj {
-                                        info!("Pair data: {:?}", pair_data);
+                                        // info!("Pair data: {:?}", pair_data);
                                         let mut pair_receipt_address = String::from("");
                                         let mut pair_rewards: Vec<(u64, Decimal)> = vec![];
                                         for (field_key, field_value) in pair_data.iter() {
-                                            info!(
-                                                "Pair data field key: {:?} => value {:?}",
-                                                field_key, field_value
-                                            );
+                                            // info!(
+                                            //     "Pair data field key: {:?} => value {:?}",
+                                            //     field_key, field_value
+                                            // );
                                             match field_key {
                                                 "pair_receipt_address" => {
                                                     pair_receipt_address = self
@@ -509,10 +518,10 @@ mod dexter_claim_component {
                                                     if let JsonValue::Array(pair_order_rewards) =
                                                         field_value
                                                     {
-                                                        info!(
-                                                            "Pair rewards: {:?}",
-                                                            pair_order_rewards
-                                                        );
+                                                        // info!(
+                                                        //     "Pair rewards: {:?}",
+                                                        //     pair_order_rewards
+                                                        // );
                                                         for order_reward_data in pair_order_rewards
                                                         {
                                                             if let JsonValue::Array(
@@ -551,7 +560,7 @@ mod dexter_claim_component {
                                                 }
                                             }
                                         }
-                                        info!("Loaded pair rewards: {:?}", pair_rewards);
+                                        // info!("Loaded pair rewards: {:?}", pair_rewards);
                                         if pair_receipt_address == "" {
                                             panic!("Found pair rewards without preceding pair address.");
                                         } else {
@@ -599,9 +608,13 @@ mod dexter_claim_component {
                 let mut skip_account = false;
                 let account_address_str = account_data.account_address.clone();
                 info!("Account address string: {:?}", account_address_str);
-                
-                info!("Account address: {:?}", _account_address);
-                let account_id = NonFungibleLocalId::string(account_address_str.clone()).expect(&format!("Could not convert {} into a valid NFT ID", account_address_str.clone()));
+                let account_address = DexterClaimComponent::create_component_address_from_string(
+                    account_address_str.clone(),
+                    &self.env,
+                );
+                info!("Account address: {:?}", account_address);
+                let account_id = NonFungibleLocalId::string(account_address.to_hex()).expect(&format!("Could not convert {} into a valid NFT ID", account_address.to_hex()));
+                info!("Account NFT id: {:?}", account_id);
                 let existing_account_data: AccountRewardsData;
                 if self.account_rewards_nft_manager.non_fungible_exists(&account_id) {
                     existing_account_data = self.account_rewards_nft_manager.get_non_fungible_data(&account_id)
@@ -617,11 +630,15 @@ mod dexter_claim_component {
                             account_address_str.clone(),
                             &self.env,
                         );
-                        let mut global_account: Global<Account> = account_address.into();
+                        info!("Account address: {:?}", account_address);
+                        let mut global_account = Global::<Account>::from(account_address.clone());
+                        // info!("After account var creation");
                         if let Some(returned_nft) = global_account.try_deposit_or_refund(new_nft, None) {
+                            info!("Could not deposit nft");
                             returned_nft.burn();
                             skip_account = true;
                         };
+                        info!("Account received NFT");
                     } else {
                         skip_account = true;
                     }
@@ -767,14 +784,14 @@ mod dexter_claim_component {
         }
 
         fn get_number_value(&self, json_value: &JsonValue, field_name: &str) -> u64 {
-            info!("Get number value for {:?}", json_value);
+            // info!("Get number value for {:?}", json_value);
             match json_value {
                 JsonValue::Number(field_value) => {
-                    info!("{}: {:?}", field_name, field_value);
+                    // info!("{}: {:?}", field_name, field_value);
                     let field_number = field_value
                         .as_fixed_point_u64(0)
                         .expect(&format!("Could not convert {} to a u64", field_value));
-                    info!("Field number: {}", field_number);
+                    // info!("Field number: {}", field_number);
                     return field_number;
                 }
                 JsonValue::Short(field_value) => {
