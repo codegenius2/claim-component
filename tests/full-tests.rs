@@ -91,7 +91,7 @@ fn add_orders_rewards_test() {
     let main_account = test_runner.new_allocated_account();
     let dextr_admin_token =
         test_runner.create_fungible_resource(dec!(1), DIVISIBILITY_NONE, main_account.2);
-    let (component_address, _dapp_def_address, claim_token_address) =
+    let (component_address, _dapp_def_address, _claim_token_address) =
         setup_component(&main_account, XRD, dextr_admin_token, &mut test_runner);
     // let test_str2 = r##"{"accounts":[["account_sim1c956qr3kxlgypxwst89j9yf24tjc7zxd4up38x37zr6q4jxdx9rhma","756.94"]],"orders":[{ "pair_address": "DEXTR/XRD", "pair_rewards": [["1303","1153.12"],["1306","14089.93"]]}]}"##;
     let test_str = build_orders_test_str(&mut test_runner);
