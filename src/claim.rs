@@ -73,13 +73,13 @@ mod dexter_claim_component {
         }
     }
     struct DexterClaimComponent {
-        dextr_token_address: ResourceAddress,
-        admin_token_address: ResourceAddress,
-        account_rewards_nft_manager: ResourceManager,
+        pub dextr_token_address: ResourceAddress,
+        pub admin_token_address: ResourceAddress,
+        pub account_rewards_nft_manager: ResourceManager,
         // claim_accounts: KeyValueStore<String, HashMap<String, HashMap<String, Decimal>>>,
-        claim_orders: KeyValueStore<String, Decimal>, // KVS<Order receipt resource address +"#"+ Order recipt local id, Reward Amount>
-        claim_vaults: KeyValueStore<ResourceAddress, Vault>,
-        env: String,
+        pub claim_orders: KeyValueStore<String, Decimal>, // KVS<Order receipt resource address +"#"+ Order recipt local id, Reward Amount>
+        pub claim_vaults: KeyValueStore<ResourceAddress, Vault>,
+        pub env: String,
     }
 
     impl DexterClaimComponent {
@@ -179,12 +179,11 @@ mod dexter_claim_component {
 
          pub fn add_orders_rewards(
             &mut self,
-            reward_name: String,
             reward_token: ResourceAddress,
             orders_rewards_string: String,
             rewards_bucket: Bucket,
         ) -> Bucket {
-            self.add_rewards(reward_name, reward_token, vec![], orders_rewards_string, rewards_bucket)
+            self.add_rewards(String::from(""), reward_token, vec![], orders_rewards_string, rewards_bucket)
         }
 
         pub fn add_rewards(
@@ -248,11 +247,10 @@ mod dexter_claim_component {
         
         pub fn remove_orders_rewards(
             &mut self, 
-            reward_name: String,
             reward_token: ResourceAddress,
             orders_rewards_string: String
         ) -> Bucket {
-            self.remove_rewards(reward_name, reward_token, vec![], orders_rewards_string)
+            self.remove_rewards(String::from(""), reward_token, vec![], orders_rewards_string)
         }
         
         pub fn remove_rewards(
@@ -283,6 +281,80 @@ mod dexter_claim_component {
                 }
             }
             return_bucket
+        }
+
+        pub fn claim_rewards(
+            &mut self,
+            reward_nft_proofs: Vec<NonFungibleProof>,
+            orders_proofs: Vec<NonFungibleProof>,
+        ) -> Vec<Bucket> {
+            info!("Starting to claim rewards!");
+            let mut token_totals: HashMap<ResourceAddress, Decimal> = HashMap::new();
+            let mut return_buckets: Vec<Bucket> = vec![];
+            let rewards_nft_address = self.account_rewards_nft_manager.address();
+            for reward_proof in reward_nft_proofs {
+                let nft = reward_proof
+                    .check(rewards_nft_address.clone())
+                    .as_non_fungible();
+                let nft_id = nft.non_fungible_local_id();
+                let nft_data = nft
+                    .non_fungible::<AccountRewardsData>()
+                    .data();
+                for reward_name_tokens in nft_data.rewards.into_values() {
+                    for (token_address_string, token_reward) in reward_name_tokens {
+                        let existing_token_total = token_totals.entry(token_address_string.clone()).or_insert(Decimal::ZERO).to_owned();
+                        token_totals.insert(
+                            token_address_string.clone(), 
+                            existing_token_total.checked_add(token_reward).expect(&format!("Could not add token reward {:?} to existing token total {:?}.", token_reward, existing_token_total))
+                        );
+                    }
+                };
+                self.account_rewards_nft_manager.update_non_fungible_data::<HashMap<String, HashMap<String, Decimal>>>(&nft_id, "rewards", HashMap::new());
+            }
+            info!("Handled accounts claims");
+
+            info!("Starting to handle order claims");
+            let mut dextr_token_total = token_totals.entry(self.dextr_token_address.clone()).or_insert(Decimal::ZERO).clone();
+            let mut orders_to_remove: Vec<String> = vec![];
+            for orders_proof in orders_proofs {
+                let proof_resource_address = orders_proof.resource_address();
+                let resource_string = DexterClaimComponent::create_resource_address_string(
+                            &proof_resource_address,
+                            &self.env,
+                        );
+                let order_ids = orders_proof.skip_checking().non_fungible_local_ids();
+                for order_id in order_ids {
+                    let mut order_index_string =
+                        resource_string.clone();
+                    let order_id_string = order_id.to_string();
+                    info!("order_id string: {:?}", order_id_string);
+                    order_index_string.push_str(&order_id_string);
+                    info!("Order_index_string {:?}", order_index_string);
+                    if let Some(order_claim_amount) = self.claim_orders.get(&order_index_string)
+                    {
+                        dextr_token_total = dextr_token_total
+                            .checked_add(order_claim_amount.clone())
+                            .expect(&format!("Could not add order claim amount {:?} to total {:?}", order_claim_amount.clone(), dextr_token_total.clone()));
+                        orders_to_remove.push(order_index_string.clone());
+                    }
+                }
+            }
+            token_totals.insert(
+                self.dextr_token_address.clone(), 
+                dextr_token_total
+            );
+            for order in orders_to_remove {
+                self.claim_orders.remove(&order);
+            }
+            info!("Handled orders claims");
+            for (token_address, token_reward) in token_totals {
+                if self.claim_vaults.get(&token_address).is_some() {
+                    let mut token_vault = self.claim_vaults.get_mut(&token_address).unwrap();
+                    assert!(token_vault.amount() >= token_reward, "Not enough tokens in component to pay for claimed rewards.");
+                    return_buckets.push(token_vault.take(token_reward));
+                }
+            }
+            return_buckets
         }
 
         fn load_account_rewards(&mut self, reward_name: String, reward_token: ResourceAddress, account_rewards: Vec<(ComponentAddress,Decimal)>, add: bool) -> Decimal {
@@ -389,80 +461,6 @@ mod dexter_claim_component {
             total_orders_reward_amount
         }
 
-        pub fn claim_rewards(
-            &mut self,
-            reward_nft_proofs: Vec<NonFungibleProof>,
-            orders_proofs: Vec<NonFungibleProof>,
-        ) -> Vec<Bucket> {
-            info!("Starting to claim rewards!");
-            let mut token_totals: HashMap<ResourceAddress, Decimal> = HashMap::new();
-            let mut return_buckets: Vec<Bucket> = vec![];
-            let rewards_nft_address = self.account_rewards_nft_manager.address();
-            for reward_proof in reward_nft_proofs {
-                let nft = reward_proof
-                    .check(rewards_nft_address.clone())
-                    .as_non_fungible();
-                let nft_id = nft.non_fungible_local_id();
-                let nft_data = nft
-                    .non_fungible::<AccountRewardsData>()
-                    .data();
-                for reward_name_tokens in nft_data.rewards.into_values() {
-                    for (token_address_string, token_reward) in reward_name_tokens {
-                        let existing_token_total = token_totals.entry(token_address_string.clone()).or_insert(Decimal::ZERO).to_owned();
-                        token_totals.insert(
-                            token_address_string.clone(), 
-                            existing_token_total.checked_add(token_reward).expect(&format!("Could not add token reward {:?} to existing token total {:?}.", token_reward, existing_token_total))
-                        );
-                    }
-                };
-                self.account_rewards_nft_manager.update_non_fungible_data::<HashMap<String, HashMap<String, Decimal>>>(&nft_id, "rewards", HashMap::new());
-            }
-            info!("Handled accounts claims");
-
-            info!("Starting to handle order claims");
-            let mut dextr_token_total = token_totals.entry(self.dextr_token_address.clone()).or_insert(Decimal::ZERO).clone();
-            let mut orders_to_remove: Vec<String> = vec![];
-            for orders_proof in orders_proofs {
-                let proof_resource_address = orders_proof.resource_address();
-                let resource_string = DexterClaimComponent::create_resource_address_string(
-                            &proof_resource_address,
-                            &self.env,
-                        );
-                let order_ids = orders_proof.skip_checking().non_fungible_local_ids();
-                for order_id in order_ids {
-                    let mut order_index_string =
-                        resource_string.clone();
-                    let order_id_string = order_id.to_string();
-                    info!("order_id string: {:?}", order_id_string);
-                    order_index_string.push_str(&order_id_string);
-                    info!("Order_index_string {:?}", order_index_string);
-                    if let Some(order_claim_amount) = self.claim_orders.get(&order_index_string)
-                    {
-                        dextr_token_total = dextr_token_total
-                            .checked_add(order_claim_amount.clone())
-                            .expect(&format!("Could not add order claim amount {:?} to total {:?}", order_claim_amount.clone(), dextr_token_total.clone()));
-                        orders_to_remove.push(order_index_string.clone());
-                    }
-                }
-            }
-            token_totals.insert(
-                self.dextr_token_address.clone(), 
-                dextr_token_total
-            );
-            for order in orders_to_remove {
-                self.claim_orders.remove(&order);
-            }
-            info!("Handled orders claims");
-            for (token_address, token_reward) in token_totals {
-                if self.claim_vaults.get(&token_address).is_some() {
-                    let mut token_vault = self.claim_vaults.get_mut(&token_address).unwrap();
-                    assert!(token_vault.amount() >= token_reward, "Not enough tokens in component to pay for claimed rewards.");
-                    return_buckets.push(token_vault.take(token_reward));
-                }
-            }
-            return_buckets
-        }
-
         fn parse_orders_rewards_data(&self, orders_rewards_data_str: String) -> Vec<JsonPairOrderRewards> {
             let mut result = vec![];
             let changed_rewards_data_str = orders_rewards_data_str.replace("'", "\"");
@@ -549,8 +547,6 @@ mod dexter_claim_component {
             result
         }
 
-        
-
         fn get_string_value(&self, json_string_value: &JsonValue, field_name: &str) -> String {
             match json_string_value {
                 JsonValue::Short(field_value) => {
@@ -607,35 +603,6 @@ mod dexter_claim_component {
             }
         }
 
-        // fn create_resource_address_from_string(string: String, env: &str) -> ResourceAddress {
-        //     if env == "mainnet" {
-        //         ResourceAddress::try_from_bech32(
-        //             &AddressBech32Decoder::new(&NetworkDefinition::mainnet()),
-        //             &string,
-        //         )
-        //         .expect(&format!(
-        //             "Could not convert string {:?} into ResourceAddress.",
-        //             string
-        //         ))
-        //     } else if env == "stokenet" {
-        //         let stokenet_def = NetworkDefinition {
-        //             id: 2,
-        //             logical_name: String::from("stokenet"),
-        //             hrp_suffix: String::from("tdx_2_"),
-        //         };
-        //         ResourceAddress::try_from_bech32(&AddressBech32Decoder::new(&stokenet_def), &string)
-        //             .expect(&format!(
-        //                 "Could not convert string {:?} into ResourceAddress.",
-        //                 string
-        //             ))
-        //     } else {
-        //         ResourceAddress::try_from_hex(&string).expect(&format!(
-        //             "Could not convert string {:?} into ResourceAddress.",
-        //             string
-        //         ))
-        //     }
-        // }
-
         fn create_component_address_string(address: &ComponentAddress, env: &str) -> String {
             if env == "mainnet" || env == "stokenet" {
                 Runtime::bech32_encode_address(address.clone())
@@ -643,38 +610,6 @@ mod dexter_claim_component {
                 address.to_hex()
             }
         }
-
-        // fn create_component_address_from_string(string: String, env: &str) -> ComponentAddress {
-        //     if env == "mainnet" {
-        //         ComponentAddress::try_from_bech32(
-        //             &AddressBech32Decoder::new(&NetworkDefinition::mainnet()),
-        //             &string,
-        //         )
-        //         .expect(&format!(
-        //             "Could not convert string {:?} into ComponentAddress.",
-        //             string
-        //         ))
-        //     } else if env == "stokenet" {
-        //         let stokenet_def = NetworkDefinition {
-        //             id: 2,
-        //             logical_name: String::from("stokenet"),
-        //             hrp_suffix: String::from("tdx_2_"),
-        //         };
-        //         ComponentAddress::try_from_bech32(
-        //             &AddressBech32Decoder::new(&stokenet_def),
-        //             &string,
-        //         )
-        //         .expect(&format!(
-        //             "Could not convert string {:?} into ComponentAddress.",
-        //             string
-        //         ))
-        //     } else {
-        //         ComponentAddress::try_from_hex(&string).expect(&format!(
-        //             "Could not convert string {:?} into ComponentAddress.",
-        //             string
-        //         ))
-        //     }
-        // }
 
     }
 }
