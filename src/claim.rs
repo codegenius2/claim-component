@@ -13,33 +13,11 @@ pub struct JsonRewardsData {
     pub orders: Vec<JsonPairOrderRewards>,
 }
 
-// #[derive(ScryptoSbor, Clone, Debug)]
-// pub struct JsonRewardNames {
-//     pub name_id: u64,
-//     pub name: String,
-// }
-// #[derive(ScryptoSbor, Clone, Debug)]
-// pub struct JsonRewardTokens {
-//     pub token_id: u64,
-//     pub token_address: String,
-// }
 #[derive(ScryptoSbor, Clone, Debug)]
 pub struct JsonAccountRewards {
     pub account_address: String,
     pub account_reward: Decimal,
 }
-
-// #[derive(ScryptoSbor, Clone, Debug)]
-// pub struct JsonNameRewards {
-//     pub name_id: u64,
-//     pub name_rewards: Vec<JsonNameTokenRewards>,
-// }
-
-// #[derive(ScryptoSbor, Clone, Debug)]
-// pub struct JsonNameTokenRewards {
-//     pub token_id: u64,
-//     pub token_reward: Decimal,
-// }
 
 #[derive(ScryptoSbor, Clone, Debug)]
 pub struct JsonPairOrderRewards {
@@ -128,7 +106,7 @@ mod dexter_claim_component {
                 // claim_accounts: KeyValueStore::new(),
                 claim_orders: KeyValueStore::new(),
                 claim_vaults: KeyValueStore::new(),
-                env: String::from("local"),
+                env: String::from("mainnet"),
             }
             .instantiate()
             .prepare_to_globalize(OwnerRole::Updatable(rule!(require(admin_token_address.clone()))))
@@ -197,9 +175,8 @@ mod dexter_claim_component {
             assert!(reward_token == rewards_bucket.resource_address(), "Reward Token address must match tokens in Rewards Bucket.");
             // comment below out for production
             let _rewards_bucket_address_string =
-                DexterClaimComponent::create_resource_address_string(
+                self.create_resource_address_string(
                     &rewards_bucket.resource_address(),
-                    &self.env,
                 );
             info!(
                 "Reward bucket for resource {}: Amount: {}",
@@ -209,11 +186,11 @@ mod dexter_claim_component {
             // comment above out for production
             let mut reward_tokens_total = Decimal::ZERO;
             if account_rewards.len() > 0 {
-                reward_tokens_total = self.load_account_rewards(reward_name.clone(), reward_token, account_rewards, true);
+                reward_tokens_total = reward_tokens_total + self.load_account_rewards(reward_name.clone(), reward_token, account_rewards, true);
             }
             if orders_rewards_string != "" {
                 let order_rewards = self.parse_orders_rewards_data(orders_rewards_string);
-                reward_tokens_total = self.load_orders_rewards(order_rewards, true);
+                reward_tokens_total = reward_tokens_total + self.load_orders_rewards(order_rewards, true);
             }
             if reward_tokens_total > rewards_bucket.amount() {
                 panic!("Not enough tokens sent in rewards bucket. Needed {:?}, but found only {:?}.", reward_tokens_total.clone(), rewards_bucket.amount());
@@ -318,9 +295,8 @@ mod dexter_claim_component {
             let mut orders_to_remove: Vec<String> = vec![];
             for orders_proof in orders_proofs {
                 let proof_resource_address = orders_proof.resource_address();
-                let resource_string = DexterClaimComponent::create_resource_address_string(
+                let resource_string = self.create_resource_address_string(
                             &proof_resource_address,
-                            &self.env,
                         );
                 let order_ids = orders_proof.skip_checking().non_fungible_local_ids();
                 for order_id in order_ids {
@@ -361,7 +337,7 @@ mod dexter_claim_component {
             let mut total_token_change = Decimal::ZERO;
             for (account_address, account_reward) in account_rewards {
                 let mut skip_account = false;
-                let account_id = NonFungibleLocalId::string(account_address.to_hex()).expect(&format!("Could not convert {} into a valid NFT ID", account_address.to_hex()));
+                let account_id = NonFungibleLocalId::string(self.create_account_id(&account_address)).expect(&format!("Could not convert {:?} into a valid NFT ID", account_address));
                 info!("Account NFT id: {:?}", account_id);
                 let existing_account_data: AccountRewardsData;
                 if self.account_rewards_nft_manager.non_fungible_exists(&account_id) {
@@ -369,7 +345,7 @@ mod dexter_claim_component {
                 } else {
                     // account_nft_exists = false;
                     existing_account_data = AccountRewardsData {
-                        account_address: DexterClaimComponent::create_component_address_string(&account_address, &self.env),
+                        account_address: self.create_component_address_string(&account_address),
                         rewards: HashMap::new()
                     };
                     if add {
@@ -386,6 +362,7 @@ mod dexter_claim_component {
                         skip_account = true;
                     }
                 }
+                info!("Existing account data: {:?}", existing_account_data);
                 let mut existing_account_rewards = existing_account_data.rewards;
                 if !skip_account {
                     let mut existing_name_data = existing_account_rewards
@@ -595,21 +572,34 @@ mod dexter_claim_component {
             }
         }
 
-        fn create_resource_address_string(address: &ResourceAddress, env: &str) -> String {
-            if env == "mainnet" || env == "stokenet" {
+        fn create_resource_address_string(&self, address: &ResourceAddress) -> String {
+            if self.env == "mainnet" || self.env == "stokenet" {
                 Runtime::bech32_encode_address(address.clone())
             } else {
                 address.to_hex()
             }
         }
 
-        fn create_component_address_string(address: &ComponentAddress, env: &str) -> String {
-            if env == "mainnet" || env == "stokenet" {
+        fn create_component_address_string(&self, address: &ComponentAddress) -> String {
+            if self.env == "mainnet" || self.env == "stokenet" {
                 Runtime::bech32_encode_address(address.clone())
             } else {
                 address.to_hex()
             }
         }
 
+        fn create_account_id(&self, address: &ComponentAddress) -> String {
+            if self.env == "mainnet" || self.env == "stokenet" {
+                let full_address = Runtime::bech32_encode_address(address.clone());
+                let address_split: Vec<&str> = full_address.split("1").collect();
+                let mut id = String::from("");
+                if address_split.len() > 0 {
+                    id = address_split[1].to_string();
+                }
+                id
+            } else {
+                address.to_hex()
+            }
+        }
     }
 }
