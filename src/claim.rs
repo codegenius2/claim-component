@@ -239,11 +239,11 @@ mod dexter_claim_component {
         ) -> Bucket {
             let mut reward_tokens_removed = Decimal::ZERO;
             if account_rewards.len() > 0 {
-                reward_tokens_removed = self.load_account_rewards(reward_name.clone(), reward_token, account_rewards, false);
+                reward_tokens_removed = reward_tokens_removed + self.load_account_rewards(reward_name.clone(), reward_token, account_rewards, false);
             }
             if orders_rewards_string.len() > 0 {
                 let order_rewards = self.parse_orders_rewards_data(orders_rewards_string);
-                reward_tokens_removed = self.load_orders_rewards(order_rewards, false);
+                reward_tokens_removed = reward_tokens_removed + self.load_orders_rewards(order_rewards, false);
             }
             let mut return_bucket = Bucket::new(reward_token.clone());
             if reward_tokens_removed > Decimal::ZERO {
@@ -273,6 +273,7 @@ mod dexter_claim_component {
                 let nft = reward_proof
                     .check(rewards_nft_address.clone())
                     .as_non_fungible();
+                //TODO Change this to also handle multiple ids in same proof like for orders below
                 let nft_id = nft.non_fungible_local_id();
                 let nft_data = nft
                     .non_fungible::<AccountRewardsData>()
