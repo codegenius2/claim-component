@@ -54,8 +54,7 @@ mod dexter_claim_component {
         pub dextr_token_address: ResourceAddress,
         pub admin_token_address: ResourceAddress,
         pub account_rewards_nft_manager: ResourceManager,
-        // claim_accounts: KeyValueStore<String, HashMap<String, HashMap<String, Decimal>>>,
-        pub claim_orders: KeyValueStore<String, Decimal>, // KVS<Order receipt resource address +"#"+ Order recipt local id, Reward Amount>
+        pub claim_orders: KeyValueStore<String, Decimal>, // KVS<Order receipt resource address +"#"+ Order recipt local id + "#", Reward Amount>
         pub claim_vaults: KeyValueStore<ResourceAddress, Vault>,
         pub env: String,
     }
@@ -178,11 +177,11 @@ mod dexter_claim_component {
                 self.create_resource_address_string(
                     &rewards_bucket.resource_address(),
                 );
-            info!(
-                "Reward bucket for resource {}: Amount: {}",
-                _rewards_bucket_address_string,
-                rewards_bucket.amount()
-            );
+            // info!(
+            //     "Reward bucket for resource {}: Amount: {}",
+            //     _rewards_bucket_address_string,
+            //     rewards_bucket.amount()
+            // );
             // comment above out for production
             let mut reward_tokens_total = Decimal::ZERO;
             if account_rewards.len() > 0 {
@@ -265,7 +264,7 @@ mod dexter_claim_component {
             reward_nft_proofs: Vec<NonFungibleProof>,
             orders_proofs: Vec<NonFungibleProof>,
         ) -> Vec<Bucket> {
-            info!("Starting to claim rewards!");
+            // info!("Starting to claim rewards!");
             let mut token_totals: HashMap<ResourceAddress, Decimal> = HashMap::new();
             let mut return_buckets: Vec<Bucket> = vec![];
             let rewards_nft_address = self.account_rewards_nft_manager.address();
@@ -275,7 +274,7 @@ mod dexter_claim_component {
                 for nft in nfts {
                     let nft_data = nft
                         .data();
-                    info!("Claim NFT Data: {:?}", nft_data);
+                    // info!("Claim NFT Data: {:?}", nft_data);
                     for reward_name_tokens in nft_data.rewards.into_values() {
                         for (token_address_string, token_reward) in reward_name_tokens {
                             let existing_token_total = token_totals.entry(token_address_string.clone()).or_insert(Decimal::ZERO).to_owned();
@@ -283,33 +282,15 @@ mod dexter_claim_component {
                                 token_address_string.clone(), 
                                 existing_token_total.checked_add(token_reward).expect(&format!("Could not add token reward {:?} to existing token total {:?}.", token_reward, existing_token_total))
                             );
-                            info!("Token totals: {:?}", token_totals);
+                            // info!("Token totals: {:?}", token_totals);
                         }
                     };
                     self.account_rewards_nft_manager.update_non_fungible_data::<HashMap<String, HashMap<String, Decimal>>>(nft.local_id(), "rewards", HashMap::new());
                 }
-                // let nft = reward_proof
-                //     .check(rewards_nft_address.clone())
-                //     .as_non_fungible();
-                // //TODO Change this to also handle multiple ids in same proof like for orders below
-                // let nft_id = nft.non_fungible_local_id();
-                // let nft_data = nft
-                //     .non_fungible::<AccountRewardsData>()
-                //     .data();
-                // for reward_name_tokens in nft_data.rewards.into_values() {
-                //     for (token_address_string, token_reward) in reward_name_tokens {
-                //         let existing_token_total = token_totals.entry(token_address_string.clone()).or_insert(Decimal::ZERO).to_owned();
-                //         token_totals.insert(
-                //             token_address_string.clone(), 
-                //             existing_token_total.checked_add(token_reward).expect(&format!("Could not add token reward {:?} to existing token total {:?}.", token_reward, existing_token_total))
-                //         );
-                //     }
-                // };
-                // self.account_rewards_nft_manager.update_non_fungible_data::<HashMap<String, HashMap<String, Decimal>>>(&nft_id, "rewards", HashMap::new());
             }
-            info!("Handled accounts claims");
+            // info!("Handled accounts claims");
 
-            info!("Starting to handle order claims");
+            // info!("Starting to handle order claims");
             let mut dextr_token_total = token_totals.entry(self.dextr_token_address.clone()).or_insert(Decimal::ZERO).clone();
             let mut orders_to_remove: Vec<String> = vec![];
             for orders_proof in orders_proofs {
@@ -322,9 +303,9 @@ mod dexter_claim_component {
                     let mut order_index_string =
                         resource_string.clone();
                     let order_id_string = order_id.to_string();
-                    info!("order_id string: {:?}", order_id_string);
+                    // info!("order_id string: {:?}", order_id_string);
                     order_index_string.push_str(&order_id_string);
-                    info!("Order_index_string {:?}", order_index_string);
+                    // info!("Order_index_string {:?}", order_index_string);
                     if let Some(order_claim_amount) = self.claim_orders.get(&order_index_string)
                     {
                         dextr_token_total = dextr_token_total
@@ -341,7 +322,7 @@ mod dexter_claim_component {
             for order in orders_to_remove {
                 self.claim_orders.remove(&order);
             }
-            info!("Handled orders claims");
+            // info!("Handled orders claims");
             for (token_address, token_reward) in token_totals {
                 if self.claim_vaults.get(&token_address).is_some() {
                     let mut token_vault = self.claim_vaults.get_mut(&token_address).unwrap();
@@ -357,7 +338,7 @@ mod dexter_claim_component {
             for (account_address, account_reward) in account_rewards {
                 let mut skip_account = false;
                 let account_id = NonFungibleLocalId::string(self.create_account_id(&account_address)).expect(&format!("Could not convert {:?} into a valid NFT ID", account_address));
-                info!("Account NFT id: {:?}", account_id);
+                // info!("Account NFT id: {:?}", account_id);
                 let existing_account_data: AccountRewardsData;
                 if self.account_rewards_nft_manager.non_fungible_exists(&account_id) {
                     existing_account_data = self.account_rewards_nft_manager.get_non_fungible_data(&account_id)
@@ -372,23 +353,23 @@ mod dexter_claim_component {
                         let account_component: Global<AnyComponent> = Global::from(account_address);
                         let returned_bucket: Option<NonFungibleBucket> = account_component.call::<(NonFungibleBucket,Option<ResourceOrNonFungible>),_>("try_deposit_or_refund", &(new_nft, None));
                         if let Some(returned_nft) = returned_bucket {
-                            info!("Could not deposit nft to account {:?}", account_address);
+                            // info!("Could not deposit nft to account {:?}", account_address);
                             returned_nft.burn();
                             skip_account = true;
                         };
-                        info!("Account received NFT");
+                        // info!("Account received NFT");
                     } else {
                         skip_account = true;
                     }
                 }
-                info!("Existing account data: {:?}", existing_account_data);
+                // info!("Existing account data: {:?}", existing_account_data);
                 let mut existing_account_rewards = existing_account_data.rewards;
                 if !skip_account {
                     let mut existing_name_data = existing_account_rewards
                         .entry(reward_name.clone())
                         .or_insert(HashMap::new())
                         .clone();
-                    info!("Existing name data: {:?}", existing_name_data);
+                    // info!("Existing name data: {:?}", existing_name_data);
                     let mut existing_token_total = existing_name_data
                         .entry(reward_token.clone())
                         .or_insert(Decimal::ZERO)
@@ -413,16 +394,16 @@ mod dexter_claim_component {
                     } else {
                         existing_name_data.remove(&reward_token);
                     }
-                    info!("Existing name data (after update) {:?}", existing_name_data);
+                    // info!("Existing name data (after update) {:?}", existing_name_data);
                     total_token_change = total_token_change + token_change;
-                    info!("Total token reward: {:?}", total_token_change);
+                    // info!("Total token reward: {:?}", total_token_change);
                     if existing_name_data.len() > 0 {
                         existing_account_rewards
                             .insert(reward_name.clone(), existing_name_data.to_owned());
                     } else {
                         existing_account_rewards.remove(&reward_name);
                     }
-                    info!("Existing account rewards: {:?}", existing_account_rewards);
+                    // info!("Existing account rewards: {:?}", existing_account_rewards);
                     self.account_rewards_nft_manager.update_non_fungible_data::<HashMap<String, HashMap<ResourceAddress, Decimal>>>(&account_id, "rewards", existing_account_rewards);
                 }
             }
@@ -442,7 +423,7 @@ mod dexter_claim_component {
                     order_id_string.push_str("#");
                     order_id_string.push_str(&order_id.to_string());
                     order_id_string.push_str("#");
-                    info!("Order id string: {:?}", order_id_string);
+                    // info!("Order id string: {:?}", order_id_string);
                     total_orders_reward_amount = total_orders_reward_amount
                         .checked_add(order_reward_amount.clone())
                         .expect("Could not add to total_orders_reward_amount.");
