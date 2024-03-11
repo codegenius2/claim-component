@@ -86,7 +86,7 @@ fn add_accounts_rewards_test() {
     let _result = receipt.expect_commit_success();
     check_account_reward_amount(
         &account1_address,
-        String::from("Liquidity Rewards"),
+        String::from("Liquidity3 Rewards"),
         &dextr_token,
         dec!("123.34"),
         &claim_token_address,
@@ -416,7 +416,8 @@ pub fn claim_accounts_rewards_test() {
         tx_manifest,
         vec![NonFungibleGlobalId::from_public_key(&main_account.0)],
     );
-    println!("Receipt: {:?}", receipt);
+    // println!("Receipt: {:?}", receipt);
+    println!("After adding rewards...");
     let _result = receipt.expect_commit_success();
     check_account_reward_amount(
         &account1_address,
@@ -426,6 +427,7 @@ pub fn claim_accounts_rewards_test() {
         &claim_token_address,
         &mut test_runner,
     );
+    println!("After checking acount reward1");
     check_account_reward_amount(
         &account1_address,
         String::from("Trading Rewards"),
@@ -1091,12 +1093,19 @@ fn check_account_reward_amount(
     reward_nft_address: &ResourceAddress,
     test_runner: &mut TestRunner<NoExtension, InMemorySubstateDatabase>,
 ) {
+    println!("starting check...");
+    let nft_id_result = NonFungibleLocalId::string(account_address.to_hex());
+    println!("NFT result: {:?}", nft_id_result);
+    println!("Reward_nft_address: {:?}", reward_nft_address);
+    let nft_id = NonFungibleLocalId::string(account_address.to_hex())
+        .expect("Could not create NFT id from hex of account address");
+    println!("NFT id: {:?}", nft_id);
     let claim_token_data = test_runner.get_non_fungible_data::<AccountRewardsData>(
         reward_nft_address.clone(),
         NonFungibleLocalId::string(account_address.to_hex())
             .expect("Could not create NFT id from hex of account address"),
     );
-    // println!("Account1 Rewards Data: {:?}", claim_token_data);
+    println!("Account1 Rewards Data: {:?}", claim_token_data);
     let mut reward_amount = Decimal::ZERO;
     if let Some(account_name_rewards) = claim_token_data.rewards.get(&reward_name) {
         reward_amount = account_name_rewards
@@ -1104,6 +1113,7 @@ fn check_account_reward_amount(
             .expect("Could not find liquidity rewards for account 1 dextr token.")
             .to_owned();
     };
+    println!("Before exiting..");
     assert!(
         reward_amount == expected_amount,
         "Reward amounts dont match. Expected {:?}, but found {:?}",

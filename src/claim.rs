@@ -270,24 +270,40 @@ mod dexter_claim_component {
             let mut return_buckets: Vec<Bucket> = vec![];
             let rewards_nft_address = self.account_rewards_nft_manager.address();
             for reward_proof in reward_nft_proofs {
-                let nft = reward_proof
-                    .check(rewards_nft_address.clone())
-                    .as_non_fungible();
-                //TODO Change this to also handle multiple ids in same proof like for orders below
-                let nft_id = nft.non_fungible_local_id();
-                let nft_data = nft
-                    .non_fungible::<AccountRewardsData>()
-                    .data();
-                for reward_name_tokens in nft_data.rewards.into_values() {
-                    for (token_address_string, token_reward) in reward_name_tokens {
-                        let existing_token_total = token_totals.entry(token_address_string.clone()).or_insert(Decimal::ZERO).to_owned();
-                        token_totals.insert(
-                            token_address_string.clone(), 
-                            existing_token_total.checked_add(token_reward).expect(&format!("Could not add token reward {:?} to existing token total {:?}.", token_reward, existing_token_total))
-                        );
-                    }
-                };
-                self.account_rewards_nft_manager.update_non_fungible_data::<HashMap<String, HashMap<String, Decimal>>>(&nft_id, "rewards", HashMap::new());
+                assert!(reward_proof.resource_address() == rewards_nft_address.clone(), "Wrong NFT submitted. Only Dexter Claim NFTs can be submitted for claims.");
+                let nfts = reward_proof.skip_checking().non_fungibles::<AccountRewardsData>();
+                for nft in nfts {
+                    let nft_data = nft
+                        .data();
+                    for reward_name_tokens in nft_data.rewards.into_values() {
+                        for (token_address_string, token_reward) in reward_name_tokens {
+                            let existing_token_total = token_totals.entry(token_address_string.clone()).or_insert(Decimal::ZERO).to_owned();
+                            token_totals.insert(
+                                token_address_string.clone(), 
+                                existing_token_total.checked_add(token_reward).expect(&format!("Could not add token reward {:?} to existing token total {:?}.", token_reward, existing_token_total))
+                            );
+                        }
+                    };
+                    self.account_rewards_nft_manager.update_non_fungible_data::<HashMap<String, HashMap<String, Decimal>>>(nft.local_id(), "rewards", HashMap::new());
+                }
+                // let nft = reward_proof
+                //     .check(rewards_nft_address.clone())
+                //     .as_non_fungible();
+                // //TODO Change this to also handle multiple ids in same proof like for orders below
+                // let nft_id = nft.non_fungible_local_id();
+                // let nft_data = nft
+                //     .non_fungible::<AccountRewardsData>()
+                //     .data();
+                // for reward_name_tokens in nft_data.rewards.into_values() {
+                //     for (token_address_string, token_reward) in reward_name_tokens {
+                //         let existing_token_total = token_totals.entry(token_address_string.clone()).or_insert(Decimal::ZERO).to_owned();
+                //         token_totals.insert(
+                //             token_address_string.clone(), 
+                //             existing_token_total.checked_add(token_reward).expect(&format!("Could not add token reward {:?} to existing token total {:?}.", token_reward, existing_token_total))
+                //         );
+                //     }
+                // };
+                // self.account_rewards_nft_manager.update_non_fungible_data::<HashMap<String, HashMap<String, Decimal>>>(&nft_id, "rewards", HashMap::new());
             }
             info!("Handled accounts claims");
 
