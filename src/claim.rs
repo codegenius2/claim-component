@@ -106,7 +106,7 @@ mod dexter_claim_component {
                 // claim_accounts: KeyValueStore::new(),
                 claim_orders: KeyValueStore::new(),
                 claim_vaults: KeyValueStore::new(),
-                env: String::from("mainnet"),
+                env: String::from("local"),
             }
             .instantiate()
             .prepare_to_globalize(OwnerRole::Updatable(rule!(require(admin_token_address.clone()))))
@@ -275,6 +275,7 @@ mod dexter_claim_component {
                 for nft in nfts {
                     let nft_data = nft
                         .data();
+                    info!("Claim NFT Data: {:?}", nft_data);
                     for reward_name_tokens in nft_data.rewards.into_values() {
                         for (token_address_string, token_reward) in reward_name_tokens {
                             let existing_token_total = token_totals.entry(token_address_string.clone()).or_insert(Decimal::ZERO).to_owned();
@@ -282,6 +283,7 @@ mod dexter_claim_component {
                                 token_address_string.clone(), 
                                 existing_token_total.checked_add(token_reward).expect(&format!("Could not add token reward {:?} to existing token total {:?}.", token_reward, existing_token_total))
                             );
+                            info!("Token totals: {:?}", token_totals);
                         }
                     };
                     self.account_rewards_nft_manager.update_non_fungible_data::<HashMap<String, HashMap<String, Decimal>>>(nft.local_id(), "rewards", HashMap::new());

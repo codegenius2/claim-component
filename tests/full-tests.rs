@@ -86,7 +86,7 @@ fn add_accounts_rewards_test() {
     let _result = receipt.expect_commit_success();
     check_account_reward_amount(
         &account1_address,
-        String::from("Liquidity3 Rewards"),
+        String::from("Liquidity Rewards"),
         &dextr_token,
         dec!("123.34"),
         &claim_token_address,
@@ -508,6 +508,212 @@ pub fn claim_accounts_rewards_test() {
     //         account_address_string, account_balance
     //     );
     // }
+}
+
+#[test]
+pub fn claim_accounts_with_two_nfts_test() {
+    let mut test_runner = TestRunnerBuilder::new().without_trace().build();
+    let main_account = test_runner.new_allocated_account();
+    let dextr_token = XRD;
+    // let dextr_token =
+    //     test_runner.create_fungible_resource(dec!("10000"), DIVISIBILITY_MAXIMUM, main_account.2);
+    let dextr_admin_token =
+        test_runner.create_fungible_resource(dec!(1), DIVISIBILITY_NONE, main_account.2);
+    let (component_address, _dapp_def_address, claim_token_address) = setup_component(
+        &main_account,
+        dextr_token,
+        dextr_admin_token,
+        &mut test_runner,
+    );
+
+    let (_pubkey1, _, account1_address) = test_runner.new_allocated_account();
+    // println!(
+    //     "New account created. Pub key: {:?}, Address: {:?}, Address hex: {:?}",
+    //     pubkey1, account1_address, account1_address_string
+    // );
+    let (_pubkey2, _, account2_address) = test_runner.new_allocated_account();
+    // println!(
+    //     "New account created. Pub key: {:?}, Address: {:?}",
+    //     pubkey2, account2_address
+    // );
+    let tx_manifest = ManifestBuilder::new()
+        .withdraw_from_account(main_account.2.clone(), dextr_token, dec!("2000"))
+        .take_all_from_worktop(dextr_token, "dextr_bucket")
+        .create_proof_from_account_of_amount(main_account.2.clone(), dextr_admin_token, 1)
+        .with_name_lookup(|builder, lookup| {
+            builder.call_method(
+                component_address,
+                "add_account_rewards",
+                manifest_args!(
+                    String::from("Liquidity Rewards"),
+                    dextr_token.clone(),
+                    vec!(
+                        (account1_address, dec!("123.34")),
+                        (account2_address, dec!("345.67"))
+                    ),
+                    lookup.bucket("dextr_bucket")
+                ),
+            )
+        })
+        .take_all_from_worktop(dextr_token, "dextr_bucket2")
+        .with_name_lookup(|builder, lookup| {
+            builder.call_method(
+                component_address,
+                "add_account_rewards",
+                manifest_args!(
+                    String::from("Trading Rewards"),
+                    dextr_token.clone(),
+                    vec!(
+                        (account1_address, dec!("234.45")),
+                        (account2_address, dec!("456"))
+                    ),
+                    lookup.bucket("dextr_bucket2")
+                ),
+            )
+        })
+        .drop_all_proofs()
+        .try_deposit_entire_worktop_or_abort(main_account.2.clone(), None)
+        .build();
+
+    let receipt = test_runner.execute_manifest_ignoring_fee(
+        tx_manifest,
+        vec![NonFungibleGlobalId::from_public_key(&main_account.0)],
+    );
+    // println!("Receipt: {:?}", receipt);
+    println!("After adding rewards...");
+    let _result = receipt.expect_commit_success();
+    check_account_reward_amount(
+        &account1_address,
+        String::from("Liquidity Rewards"),
+        &dextr_token,
+        dec!("123.34"),
+        &claim_token_address,
+        &mut test_runner,
+    );
+    println!("After checking acount reward1");
+    check_account_reward_amount(
+        &account1_address,
+        String::from("Trading Rewards"),
+        &dextr_token,
+        dec!("234.45"),
+        &claim_token_address,
+        &mut test_runner,
+    );
+    check_account_reward_amount(
+        &account2_address,
+        String::from("Liquidity Rewards"),
+        &dextr_token,
+        dec!("345.67"),
+        &claim_token_address,
+        &mut test_runner,
+    );
+    check_account_reward_amount(
+        &account2_address,
+        String::from("Trading Rewards"),
+        &dextr_token,
+        dec!("456"),
+        &claim_token_address,
+        &mut test_runner,
+    );
+    let account_balance = test_runner.get_component_balance(main_account.2.clone(), dextr_token);
+    println!("Account balance: {:?}", account_balance);
+    assert!(
+        account_balance == dec!("8840.54"),
+        "Expected Account Balance of 8840.54, but found {:?}",
+        account_balance
+    );
+
+    // ### Transfer claim token from Account 1 to Account 2
+    let tx_manifest = ManifestBuilder::new()
+        .call_method(
+            account1_address.clone(),
+            "withdraw_non_fungibles",
+            manifest_args!(
+                claim_token_address.clone(),
+                vec![NonFungibleLocalId::string(account1_address.to_hex()).unwrap()],
+            ),
+        )
+        .try_deposit_entire_worktop_or_abort(account2_address.clone(), None)
+        .build();
+    let receipt = test_runner.execute_manifest_ignoring_fee(
+        tx_manifest,
+        vec![NonFungibleGlobalId::from_public_key(&_pubkey1)],
+    );
+    println!("Receipt: {:?}", receipt);
+    let _result = receipt.expect_commit_success();
+
+    // claim rewards for account2 - should include rewards for both accounts as claim nft for account1 is now also in account2
+    let test_account_address = account2_address.clone();
+    let test_account_pubkey = _pubkey2.clone();
+    let test_account_balance = dec!("11159.46");
+    let order_proofs: Vec<ManifestProof> = vec![];
+    let tx_manifest = ManifestBuilder::new()
+        .create_proof_from_account_of_non_fungibles(
+            test_account_address.clone(),
+            claim_token_address,
+            vec![
+                NonFungibleLocalId::string(account1_address.to_hex()).unwrap(),
+                NonFungibleLocalId::string(account2_address.to_hex()).unwrap(),
+            ],
+        )
+        .pop_from_auth_zone("account_nft")
+        .with_name_lookup(|builder, lookup| {
+            builder.call_method(
+                component_address,
+                "claim_rewards",
+                manifest_args!(vec!(lookup.proof("account_nft")), order_proofs),
+            )
+        })
+        .try_deposit_entire_worktop_or_abort(test_account_address, None)
+        .build();
+
+    let receipt = test_runner.execute_manifest_ignoring_fee(
+        tx_manifest,
+        vec![NonFungibleGlobalId::from_public_key(&test_account_pubkey)],
+    );
+
+    println!("Receipt: {:?}", receipt);
+    let _result = receipt.expect_commit_success();
+    let account_balance = test_runner.get_component_balance(test_account_address, XRD);
+    assert!(
+        account_balance == test_account_balance,
+        "Expected Account Balance of {:?}, but found {:?}",
+        test_account_balance,
+        account_balance
+    );
+    check_account_reward_amount(
+        &account1_address,
+        String::from("Liquidity Rewards"),
+        &dextr_token,
+        dec!("0"),
+        &claim_token_address,
+        &mut test_runner,
+    );
+    println!("After checking acount reward1");
+    check_account_reward_amount(
+        &account1_address,
+        String::from("Trading Rewards"),
+        &dextr_token,
+        dec!("0"),
+        &claim_token_address,
+        &mut test_runner,
+    );
+    check_account_reward_amount(
+        &account2_address,
+        String::from("Liquidity Rewards"),
+        &dextr_token,
+        dec!("0"),
+        &claim_token_address,
+        &mut test_runner,
+    );
+    check_account_reward_amount(
+        &account2_address,
+        String::from("Trading Rewards"),
+        &dextr_token,
+        dec!("0"),
+        &claim_token_address,
+        &mut test_runner,
+    );
 }
 
 #[test]
@@ -1093,19 +1299,12 @@ fn check_account_reward_amount(
     reward_nft_address: &ResourceAddress,
     test_runner: &mut TestRunner<NoExtension, InMemorySubstateDatabase>,
 ) {
-    println!("starting check...");
-    let nft_id_result = NonFungibleLocalId::string(account_address.to_hex());
-    println!("NFT result: {:?}", nft_id_result);
-    println!("Reward_nft_address: {:?}", reward_nft_address);
-    let nft_id = NonFungibleLocalId::string(account_address.to_hex())
-        .expect("Could not create NFT id from hex of account address");
-    println!("NFT id: {:?}", nft_id);
     let claim_token_data = test_runner.get_non_fungible_data::<AccountRewardsData>(
         reward_nft_address.clone(),
         NonFungibleLocalId::string(account_address.to_hex())
             .expect("Could not create NFT id from hex of account address"),
     );
-    println!("Account1 Rewards Data: {:?}", claim_token_data);
+    println!("Claim Token Data: {:?}", claim_token_data);
     let mut reward_amount = Decimal::ZERO;
     if let Some(account_name_rewards) = claim_token_data.rewards.get(&reward_name) {
         reward_amount = account_name_rewards
@@ -1113,7 +1312,6 @@ fn check_account_reward_amount(
             .expect("Could not find liquidity rewards for account 1 dextr token.")
             .to_owned();
     };
-    println!("Before exiting..");
     assert!(
         reward_amount == expected_amount,
         "Reward amounts dont match. Expected {:?}, but found {:?}",
