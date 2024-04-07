@@ -163,11 +163,12 @@ mod dexter_claim_component {
 
          pub fn add_orders_rewards(
             &mut self,
+            reward_name: String,
             reward_token: ResourceAddress,
             orders_rewards_string: String,
             rewards_bucket: Bucket,
         ) -> Bucket {
-            self.add_rewards(String::from(""), reward_token, vec![], orders_rewards_string, rewards_bucket)
+            self.add_rewards(reward_name, reward_token, vec![], orders_rewards_string, rewards_bucket)
         }
 
         pub fn add_rewards(
@@ -233,7 +234,7 @@ mod dexter_claim_component {
             reward_token: ResourceAddress,
             orders_rewards_string: String
         ) -> Bucket {
-            self.remove_rewards(String::from(""), reward_token, vec![], orders_rewards_string)
+            self.remove_rewards(String::from("Market Order Rewards"), reward_token, vec![], orders_rewards_string)
         }
         
         pub fn remove_rewards(
@@ -436,9 +437,9 @@ mod dexter_claim_component {
                     order_id_string.push_str(&order_id.to_string());
                     order_id_string.push_str("#");
                     // info!("Order id string: {:?}", order_id_string);
-                    total_token_change = total_token_change
-                        .checked_add(order_reward_amount.clone())
-                        .expect("Could not add to total_token_change.");
+                    // total_token_change = total_token_change
+                    //     .checked_add(order_reward_amount.clone())
+                    //     .expect("Could not add to total_token_change.");
                     let mut existing_order_data: OrderRewardsData;
                     if let Some(existing_data) = self.order_rewards.get(&order_id_string) {
                         existing_order_data = existing_data.clone();
