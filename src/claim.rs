@@ -32,8 +32,15 @@ pub struct AccountRewardsData {
     pub rewards: HashMap<String, HashMap<ResourceAddress, Decimal>> // HashMap<Reward Name, HashMap<Token Address, Token Reward>>
 }
 
+#[derive(ScryptoSbor, Clone, Debug, NonFungibleData)]
+pub struct OrderRewardsData {
+    pub order_id: String,
+    #[mutable]
+    pub rewards: HashMap<String, HashMap<ResourceAddress, Decimal>> // HashMap<Reward Name, HashMap<Token Address, Token Reward>>
+}
+
 #[blueprint]
-#[types(AccountRewardsData, String, Decimal, Vault)]
+#[types(AccountRewardsData, OrderRewardsData, String, Decimal, Vault)]
 mod dexter_claim_component {
     enable_method_auth! {
         roles {
@@ -54,7 +61,8 @@ mod dexter_claim_component {
         pub dextr_token_address: ResourceAddress,
         pub admin_token_address: ResourceAddress,
         pub account_rewards_nft_manager: ResourceManager,
-        pub claim_orders: KeyValueStore<String, Decimal>, // KVS<Order receipt resource address +"#"+ Order recipt local id + "#", Reward Amount>
+        pub order_rewards: KeyValueStore<String, OrderRewardsData>, // KSV to store order rewards. Key is unique order id = Order receipt resource address +"#"+ Order receipt local id + "#"
+        // pub claim_orders: KeyValueStore<String, Decimal>, // KVS<Order receipt resource address +"#"+ Order recipt local id + "#", Reward Amount>
         pub claim_vaults: KeyValueStore<ResourceAddress, Vault>,
         pub env: String,
     }
@@ -102,8 +110,7 @@ mod dexter_claim_component {
                 dextr_token_address,
                 admin_token_address,
                 account_rewards_nft_manager,
-                // claim_accounts: KeyValueStore::new(),
-                claim_orders: KeyValueStore::new(),
+                order_rewards: KeyValueStore::new(),
                 claim_vaults: KeyValueStore::new(),
                 env: String::from("local"),
             }
@@ -173,10 +180,10 @@ mod dexter_claim_component {
         ) -> Bucket {
             assert!(reward_token == rewards_bucket.resource_address(), "Reward Token address must match tokens in Rewards Bucket.");
             // comment below out for production
-            let _rewards_bucket_address_string =
-                self.create_resource_address_string(
-                    &rewards_bucket.resource_address(),
-                );
+            // let _rewards_bucket_address_string =
+            //     self.create_resource_address_string(
+            //         &rewards_bucket.resource_address(),
+            //     );
             // info!(
             //     "Reward bucket for resource {}: Amount: {}",
             //     _rewards_bucket_address_string,
@@ -185,11 +192,11 @@ mod dexter_claim_component {
             // comment above out for production
             let mut reward_tokens_total = Decimal::ZERO;
             if account_rewards.len() > 0 {
-                reward_tokens_total = reward_tokens_total + self.load_account_rewards(reward_name.clone(), reward_token, account_rewards, true);
+                reward_tokens_total = reward_tokens_total + self.load_account_rewards(reward_name.clone(), reward_token.clone(), account_rewards, true);
             }
             if orders_rewards_string != "" {
                 let order_rewards = self.parse_orders_rewards_data(orders_rewards_string);
-                reward_tokens_total = reward_tokens_total + self.load_orders_rewards(order_rewards, true);
+                reward_tokens_total = reward_tokens_total + self.load_orders_rewards(reward_name.clone(), reward_token.clone(), order_rewards, true);
             }
             if reward_tokens_total > rewards_bucket.amount() {
                 panic!("Not enough tokens sent in rewards bucket. Needed {:?}, but found only {:?}.", reward_tokens_total.clone(), rewards_bucket.amount());
@@ -238,11 +245,11 @@ mod dexter_claim_component {
         ) -> Bucket {
             let mut reward_tokens_removed = Decimal::ZERO;
             if account_rewards.len() > 0 {
-                reward_tokens_removed = reward_tokens_removed + self.load_account_rewards(reward_name.clone(), reward_token, account_rewards, false);
+                reward_tokens_removed = reward_tokens_removed + self.load_account_rewards(reward_name.clone(), reward_token.clone(), account_rewards, false);
             }
             if orders_rewards_string.len() > 0 {
                 let order_rewards = self.parse_orders_rewards_data(orders_rewards_string);
-                reward_tokens_removed = reward_tokens_removed + self.load_orders_rewards(order_rewards, false);
+                reward_tokens_removed = reward_tokens_removed + self.load_orders_rewards(reward_name.clone(), reward_token.clone(), order_rewards, false);
             }
             let mut return_bucket = Bucket::new(reward_token.clone());
             if reward_tokens_removed > Decimal::ZERO {
@@ -291,7 +298,6 @@ mod dexter_claim_component {
             // info!("Handled accounts claims");
 
             // info!("Starting to handle order claims");
-            let mut dextr_token_total = token_totals.entry(self.dextr_token_address.clone()).or_insert(Decimal::ZERO).clone();
             let mut orders_to_remove: Vec<String> = vec![];
             for orders_proof in orders_proofs {
                 let proof_resource_address = orders_proof.resource_address();
@@ -306,21 +312,24 @@ mod dexter_claim_component {
                     // info!("order_id string: {:?}", order_id_string);
                     order_index_string.push_str(&order_id_string);
                     // info!("Order_index_string {:?}", order_index_string);
-                    if let Some(order_claim_amount) = self.claim_orders.get(&order_index_string)
+                    if let Some(order_reward_data) = self.order_rewards.get(&order_index_string)
                     {
-                        dextr_token_total = dextr_token_total
-                            .checked_add(order_claim_amount.clone())
-                            .expect(&format!("Could not add order claim amount {:?} to total {:?}", order_claim_amount.clone(), dextr_token_total.clone()));
+                        for reward_name_tokens in order_reward_data.rewards.clone().into_values() {
+                            for (token_address_string, token_reward) in reward_name_tokens {
+                                let existing_token_total = token_totals.entry(token_address_string.clone()).or_insert(Decimal::ZERO).to_owned();
+                                token_totals.insert(
+                                    token_address_string.clone(), 
+                                    existing_token_total.checked_add(token_reward).expect(&format!("Could not add token reward {:?} to existing token total {:?}.", token_reward, existing_token_total))
+                                );
+                                // info!("Token totals: {:?}", token_totals);
+                            }
+                        };
                         orders_to_remove.push(order_index_string.clone());
                     }
                 }
             }
-            token_totals.insert(
-                self.dextr_token_address.clone(), 
-                dextr_token_total
-            );
             for order in orders_to_remove {
-                self.claim_orders.remove(&order);
+                self.order_rewards.remove(&order);
             }
             // info!("Handled orders claims");
             for (token_address, token_reward) in token_totals {
@@ -412,30 +421,81 @@ mod dexter_claim_component {
 
         fn load_orders_rewards(
             &mut self,
+            reward_name: String, reward_token: ResourceAddress,
             orders_data: Vec<JsonPairOrderRewards>,
             add: bool,
         ) -> Decimal {
-            let mut total_orders_reward_amount = Decimal::ZERO;
+            // let mut total_orders_reward_amount = Decimal::ZERO;
+            let mut total_token_change = Decimal::ZERO;
             for pair_order_rewards_data in &orders_data {
                 let pair_address_string = pair_order_rewards_data.pair_receipt_address.clone();
                 for (order_id, order_reward_amount) in &pair_order_rewards_data.pair_rewards {
+                    let mut skip_order = false;
                     let mut order_id_string = pair_address_string.clone();
                     order_id_string.push_str("#");
                     order_id_string.push_str(&order_id.to_string());
                     order_id_string.push_str("#");
                     // info!("Order id string: {:?}", order_id_string);
-                    total_orders_reward_amount = total_orders_reward_amount
+                    total_token_change = total_token_change
                         .checked_add(order_reward_amount.clone())
-                        .expect("Could not add to total_orders_reward_amount.");
-                    if add {
-                        self.claim_orders
-                            .insert(order_id_string, order_reward_amount.clone());
+                        .expect("Could not add to total_token_change.");
+                    let mut existing_order_data: OrderRewardsData;
+                    if let Some(existing_data) = self.order_rewards.get(&order_id_string) {
+                        existing_order_data = existing_data.clone();
                     } else {
-                        self.claim_orders.remove(&order_id_string);
+                        existing_order_data = OrderRewardsData {
+                            order_id: order_id_string.clone(),
+                            rewards: HashMap::new(),
+                        };
+                        if !add { skip_order = true;}
+                    }
+                    let mut existing_order_rewards = existing_order_data.rewards;
+                    if !skip_order {
+                        let mut existing_name_data = existing_order_rewards
+                            .entry(reward_name.clone())
+                            .or_insert(HashMap::new())
+                            .clone();
+                        // info!("Existing name data: {:?}", existing_name_data);
+                        let mut existing_token_total = existing_name_data
+                            .entry(reward_token.clone())
+                            .or_insert(Decimal::ZERO)
+                            .clone();
+                        let mut token_change = order_reward_amount.clone();
+                        if add {
+                            existing_token_total =
+                                existing_token_total.checked_add(token_change).expect(
+                                    "Could not add new token reward to existing token total",
+                                );
+                        } else {
+                            token_change =
+                                existing_token_total.min(order_reward_amount.clone());
+                            existing_token_total =
+                                existing_token_total.checked_sub(token_change).expect(
+                                    "Could not remove token reward from existing token total",
+                                );
+                        }
+                        if existing_token_total > Decimal::ZERO {
+                            existing_name_data
+                                .insert(reward_token.clone(), existing_token_total.to_owned());
+                        } else {
+                            existing_name_data.remove(&reward_token);
+                        }
+                        // info!("Existing name data (after update) {:?}", existing_name_data);
+                        total_token_change = total_token_change + token_change;
+                        // info!("Total token reward: {:?}", total_token_change);
+                        if existing_name_data.len() > 0 {
+                            existing_order_rewards
+                                .insert(reward_name.clone(), existing_name_data.to_owned());
+                        } else {
+                            existing_order_rewards.remove(&reward_name);
+                        }
+                        // info!("Existing account rewards: {:?}", existing_account_rewards);
+                        existing_order_data.rewards = existing_order_rewards;
+                        self.order_rewards.insert(order_id_string, existing_order_data);
                     }
                 }
             }
-            total_orders_reward_amount
+            total_token_change
         }
 
         fn parse_orders_rewards_data(&self, orders_rewards_data_str: String) -> Vec<JsonPairOrderRewards> {
