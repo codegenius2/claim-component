@@ -55,6 +55,8 @@ mod dexter_claim_component {
             remove_orders_rewards => restrict_to: [super_admin];
             remove_rewards => restrict_to: [super_admin];
             claim_rewards => PUBLIC;
+            deactivate => restrict_to: [super_admin];
+            activate => restrict_to: [super_admin];
         }
     }
     struct DexterClaimComponent {
@@ -64,7 +66,9 @@ mod dexter_claim_component {
         pub order_rewards: KeyValueStore<String, OrderRewardsData>, // KSV to store order rewards. Key is unique order id = Order receipt resource address +"#"+ Order receipt local id + "#"
         // pub claim_orders: KeyValueStore<String, Decimal>, // KVS<Order receipt resource address +"#"+ Order recipt local id + "#", Reward Amount>
         pub claim_vaults: KeyValueStore<ResourceAddress, Vault>,
+        pub active: bool,
         pub env: String,
+
     }
 
     impl DexterClaimComponent {
@@ -112,7 +116,8 @@ mod dexter_claim_component {
                 account_rewards_nft_manager,
                 order_rewards: KeyValueStore::new(),
                 claim_vaults: KeyValueStore::new(),
-                env: String::from("local"),
+                active: true,
+                env: String::from("stokenet"),
             }
             .instantiate()
             .prepare_to_globalize(OwnerRole::Updatable(rule!(require(admin_token_address.clone()))))
@@ -179,6 +184,7 @@ mod dexter_claim_component {
             orders_rewards_string: String,
             mut rewards_bucket: Bucket,
         ) -> Bucket {
+            assert!(self.active,"Component has been deactivated.");
             assert!(reward_token == rewards_bucket.resource_address(), "Reward Token address must match tokens in Rewards Bucket.");
             // comment below out for production
             // let _rewards_bucket_address_string =
@@ -273,6 +279,7 @@ mod dexter_claim_component {
             orders_proofs: Vec<NonFungibleProof>,
         ) -> Vec<Bucket> {
             // info!("Starting to claim rewards!");
+            assert!(self.active,"Component has been deactivated.");
             let mut token_totals: HashMap<ResourceAddress, Decimal> = HashMap::new();
             let mut return_buckets: Vec<Bucket> = vec![];
             let rewards_nft_address = self.account_rewards_nft_manager.address();
@@ -341,6 +348,14 @@ mod dexter_claim_component {
                 }
             }
             return_buckets
+        }
+
+        pub fn deactivate(&mut self) {
+            self.active = false;
+        }
+        
+        pub fn activate(&mut self) {
+            self.active = true;
         }
 
         fn load_account_rewards(&mut self, reward_name: String, reward_token: ResourceAddress, account_rewards: Vec<(ComponentAddress,Decimal)>, add: bool) -> Decimal {
