@@ -45,12 +45,12 @@ mod dexter_claim_component {
     enable_method_auth! {
         roles {
             super_admin => updatable_by: [OWNER];
-            admin => updatable_by: [OWNER];
+            admin => updatable_by: [OWNER, super_admin];
         },
         methods {
-            add_account_rewards => restrict_to: [admin];
-            add_orders_rewards => restrict_to: [admin];
-            add_rewards => restrict_to: [admin];
+            add_account_rewards => restrict_to: [admin, super_admin];
+            add_orders_rewards => restrict_to: [admin, super_admin];
+            add_rewards => restrict_to: [admin, super_admin];
             remove_account_rewards => restrict_to: [super_admin];
             remove_orders_rewards => restrict_to: [super_admin];
             remove_rewards => restrict_to: [super_admin];
@@ -79,6 +79,7 @@ mod dexter_claim_component {
             let (address_reservation, component_address) =
                 Runtime::allocate_component_address(<DexterClaimComponent>::blueprint_id());
             let require_component_rule = rule!(require(global_caller(component_address)));
+            let require_super_admin_rule = rule!(require(admin_token_address));
             // set up a dapp definition account for the pair
             let dapp_def_account =
                 Blueprint::<Account>::create_advanced(OwnerRole::Updatable(rule!(allow_all)), None);
@@ -86,13 +87,13 @@ mod dexter_claim_component {
             // metadata and owner for the dapp definition are added later in the function after the entities are created.
 
             let account_rewards_nft_manager = 
-                ResourceBuilder::new_string_non_fungible_with_registered_type::<AccountRewardsData>(OwnerRole::Updatable(rule!(require(admin_token_address.clone()))))
+                ResourceBuilder::new_string_non_fungible_with_registered_type::<AccountRewardsData>(OwnerRole::Updatable(require_super_admin_rule.clone()))
                 .metadata(metadata! {
                     init{
                         "name" => "DeXter Rewards NFT", updatable;
                         "description" => "An NFT that keeps track of DeXter rewards related to an account. Although the NFT can be transferred between accounts, the rewards in this NFT will always relate to the specified account.", updatable;
                         "icon_url" => Url::of("https://dexteronradix.com/logo_icon.svg"), updatable;
-                        "tags" => vec!["DeXter"], updatable;
+                        "tags" => vec!["DeXter", "Rewards"], updatable;
                         "dapp_definitions" => vec![dapp_def_address.clone()], updatable;
                     }
                 })
@@ -120,17 +121,17 @@ mod dexter_claim_component {
                 env: String::from("stokenet"),
             }
             .instantiate()
-            .prepare_to_globalize(OwnerRole::Updatable(rule!(require(admin_token_address.clone()))))
+            .prepare_to_globalize(OwnerRole::Updatable(require_super_admin_rule.clone()))
             .with_address(address_reservation)
             .roles(roles!(
-                super_admin => rule!(require(admin_token_address.clone()));
+                super_admin => require_super_admin_rule.clone();
                 admin => rule!(require(admin_token_address.clone()));
             ))
             .metadata(metadata! {
               init {
                 "name" => String::from("DeXter Claim Component"), updatable;
                 "description" => String::from("DeXter Liquidity and Trading Rewards Claim Component."), updatable;
-                "tags" => vec!["DeXter"], updatable;
+                "tags" => vec!["DeXter", "Rewards"], updatable;
                 "dapp_definition" => dapp_def_address.clone(), updatable;
               }
             })
@@ -151,7 +152,7 @@ mod dexter_claim_component {
                 "claimed_entities",
                 vec![GlobalAddress::from(component_address.clone()), account_rewards_nft_manager.address().into()],
             );
-            dapp_def_account.set_owner_role(rule!(require(admin_token_address.clone())));
+            dapp_def_account.set_owner_role(require_super_admin_rule.clone());
 
             new_component
         }
@@ -441,7 +442,6 @@ mod dexter_claim_component {
             orders_data: Vec<JsonPairOrderRewards>,
             add: bool,
         ) -> Decimal {
-            // let mut total_orders_reward_amount = Decimal::ZERO;
             let mut total_token_change = Decimal::ZERO;
             for pair_order_rewards_data in &orders_data {
                 let pair_address_string = pair_order_rewards_data.pair_receipt_address.clone();
@@ -451,10 +451,6 @@ mod dexter_claim_component {
                     order_id_string.push_str("#");
                     order_id_string.push_str(&order_id.to_string());
                     order_id_string.push_str("#");
-                    // info!("Order id string: {:?}", order_id_string);
-                    // total_token_change = total_token_change
-                    //     .checked_add(order_reward_amount.clone())
-                    //     .expect("Could not add to total_token_change.");
                     let mut existing_order_data: OrderRewardsData;
                     if let Some(existing_data) = self.order_rewards.get(&order_id_string) {
                         existing_order_data = existing_data.clone();
@@ -471,7 +467,6 @@ mod dexter_claim_component {
                             .entry(reward_name.clone())
                             .or_insert(HashMap::new())
                             .clone();
-                        // info!("Existing name data: {:?}", existing_name_data);
                         let mut existing_token_total = existing_name_data
                             .entry(reward_token.clone())
                             .or_insert(Decimal::ZERO)
@@ -496,16 +491,13 @@ mod dexter_claim_component {
                         } else {
                             existing_name_data.remove(&reward_token);
                         }
-                        // info!("Existing name data (after update) {:?}", existing_name_data);
                         total_token_change = total_token_change + token_change;
-                        // info!("Total token reward: {:?}", total_token_change);
                         if existing_name_data.len() > 0 {
                             existing_order_rewards
                                 .insert(reward_name.clone(), existing_name_data.to_owned());
                         } else {
                             existing_order_rewards.remove(&reward_name);
                         }
-                        // info!("Existing account rewards: {:?}", existing_account_rewards);
                         existing_order_data.rewards = existing_order_rewards;
                         self.order_rewards.insert(order_id_string, existing_order_data);
                     }
