@@ -60,8 +60,6 @@ mod dexter_claim_component {
         }
     }
     struct DexterClaimComponent {
-        pub dextr_token_address: ResourceAddress,
-        pub admin_token_address: ResourceAddress,
         pub account_rewards_nft_manager: ResourceManager,
         pub order_rewards: KeyValueStore<String, OrderRewardsData>, // KSV to store order rewards. Key is unique order id = Order receipt resource address +"#"+ Order receipt local id + "#"
         // pub claim_orders: KeyValueStore<String, Decimal>, // KVS<Order receipt resource address +"#"+ Order recipt local id + "#", Reward Amount>
@@ -73,13 +71,27 @@ mod dexter_claim_component {
 
     impl DexterClaimComponent {
         pub fn new(
-            dextr_token_address: ResourceAddress,
+            name: String,
+            description: String,
+            icon_url: String,
             admin_token_address: ResourceAddress,
+            super_admin_token_address: ResourceAddress,
+            owner_token_address: ResourceAddress,
+        ) -> Global<DexterClaimComponent> {
+            DexterClaimComponent::new_advanced(name, description, icon_url, rule!(require(admin_token_address)), rule!(require(super_admin_token_address)), rule!(require(owner_token_address)))
+        }
+
+        pub fn new_advanced(
+            name: String,
+            description: String,
+            icon_url: String,
+            admin_rule: AccessRule,
+            super_admin_rule: AccessRule,
+            owner_rule: AccessRule,
         ) -> Global<DexterClaimComponent> {
             let (address_reservation, component_address) =
                 Runtime::allocate_component_address(<DexterClaimComponent>::blueprint_id());
             let require_component_rule = rule!(require(global_caller(component_address)));
-            let require_super_admin_rule = rule!(require(admin_token_address));
             // set up a dapp definition account for the pair
             let dapp_def_account =
                 Blueprint::<Account>::create_advanced(OwnerRole::Updatable(rule!(allow_all)), None);
@@ -87,13 +99,13 @@ mod dexter_claim_component {
             // metadata and owner for the dapp definition are added later in the function after the entities are created.
 
             let account_rewards_nft_manager = 
-                ResourceBuilder::new_string_non_fungible_with_registered_type::<AccountRewardsData>(OwnerRole::Updatable(require_super_admin_rule.clone()))
+                ResourceBuilder::new_string_non_fungible_with_registered_type::<AccountRewardsData>(OwnerRole::Updatable(super_admin_rule.clone()))
                 .metadata(metadata! {
                     init{
-                        "name" => "DeXter Rewards NFT", updatable;
-                        "description" => "An NFT that keeps track of DeXter rewards related to an account. Although the NFT can be transferred between accounts, the rewards in this NFT will always relate to the specified account.", updatable;
-                        "icon_url" => Url::of("https://dexteronradix.com/logo_icon.svg"), updatable;
-                        "tags" => vec!["DeXter", "Rewards"], updatable;
+                        "name" => format!("{} NFT",name.clone()), updatable;
+                        "description" => "An NFT that keeps track of rewards related to an account. Although the NFT can be transferred between accounts, the rewards in this NFT will always relate to the specified account.", updatable;
+                        "icon_url" => Url::of(icon_url.clone()), updatable;
+                        "tags" => vec!["Rewards"], updatable;
                         "dapp_definitions" => vec![dapp_def_address.clone()], updatable;
                     }
                 })
@@ -112,8 +124,6 @@ mod dexter_claim_component {
                 .create_with_no_initial_supply();
 
             let new_component = Self {
-                dextr_token_address,
-                admin_token_address,
                 account_rewards_nft_manager,
                 order_rewards: KeyValueStore::new(),
                 claim_vaults: KeyValueStore::new(),
@@ -121,17 +131,18 @@ mod dexter_claim_component {
                 env: String::from("stokenet"),
             }
             .instantiate()
-            .prepare_to_globalize(OwnerRole::Updatable(require_super_admin_rule.clone()))
+            .prepare_to_globalize(OwnerRole::Updatable(owner_rule.clone()))
             .with_address(address_reservation)
             .roles(roles!(
-                super_admin => require_super_admin_rule.clone();
-                admin => rule!(require(admin_token_address.clone()));
+                super_admin => super_admin_rule.clone();
+                admin => admin_rule.clone();
             ))
             .metadata(metadata! {
               init {
-                "name" => String::from("DeXter Claim Component"), updatable;
-                "description" => String::from("DeXter Liquidity and Trading Rewards Claim Component."), updatable;
-                "tags" => vec!["DeXter", "Rewards"], updatable;
+                "name" => name.clone(), updatable;
+                "description" => description.clone(), updatable;
+                // "description" => String::from("DeXter Liquidity and Trading Rewards Claim Component."), updatable;
+                "tags" => vec!["Rewards"], updatable;
                 "dapp_definition" => dapp_def_address.clone(), updatable;
               }
             })
@@ -139,20 +150,21 @@ mod dexter_claim_component {
 
             // set dapp definition metadata and owner
             dapp_def_account.set_metadata("account_type", String::from("dapp definition"));
-            dapp_def_account.set_metadata("name", format!("DeXter Claim Component"));
+            dapp_def_account.set_metadata("name", name.clone());
             dapp_def_account.set_metadata(
                 "description",
-                format!("A component to facilitate the distribution of rewards to the DeXter community."),
+                description.clone(),
             );
             dapp_def_account.set_metadata(
                 "icon_url",
-                Url::of("https://dexteronradix.com/logo_icon.svg"),
+                Url::of(icon_url.clone()),
+                // Url::of("https://dexteronradix.com/logo_icon.svg"),
             );
             dapp_def_account.set_metadata(
                 "claimed_entities",
                 vec![GlobalAddress::from(component_address.clone()), account_rewards_nft_manager.address().into()],
             );
-            dapp_def_account.set_owner_role(require_super_admin_rule.clone());
+            dapp_def_account.set_owner_role(owner_rule.clone());
 
             new_component
         }
