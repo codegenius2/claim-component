@@ -62,7 +62,6 @@ mod dexter_claim_component {
     struct DexterClaimComponent {
         pub account_rewards_nft_manager: ResourceManager,
         pub order_rewards: KeyValueStore<String, OrderRewardsData>, // KSV to store order rewards. Key is unique order id = Order receipt resource address +"#"+ Order receipt local id + "#"
-        // pub claim_orders: KeyValueStore<String, Decimal>, // KVS<Order receipt resource address +"#"+ Order recipt local id + "#", Reward Amount>
         pub claim_vaults: KeyValueStore<ResourceAddress, Vault>,
         pub active: bool,
         pub env: String,
@@ -128,7 +127,7 @@ mod dexter_claim_component {
                 order_rewards: KeyValueStore::new(),
                 claim_vaults: KeyValueStore::new(),
                 active: true,
-                env: String::from("stokenet"),
+                env: String::from(""),
             }
             .instantiate()
             .prepare_to_globalize(OwnerRole::Updatable(owner_rule.clone()))
@@ -653,23 +652,25 @@ mod dexter_claim_component {
         }
 
         fn create_resource_address_string(&self, address: &ResourceAddress) -> String {
-            if self.env == "mainnet" || self.env == "stokenet" {
-                Runtime::bech32_encode_address(address.clone())
-            } else {
+            if self.env == "local" {
                 address.to_hex()
+            } else {
+                Runtime::bech32_encode_address(address.clone())
             }
         }
 
         fn create_component_address_string(&self, address: &ComponentAddress) -> String {
-            if self.env == "mainnet" || self.env == "stokenet" {
-                Runtime::bech32_encode_address(address.clone())
-            } else {
+            if self.env == "local" {
                 address.to_hex()
+            } else {
+                Runtime::bech32_encode_address(address.clone())
             }
         }
 
         fn create_account_id(&self, address: &ComponentAddress) -> String {
-            if self.env == "mainnet" || self.env == "stokenet" {
+            if self.env == "local" {
+                address.to_hex()
+            } else {
                 let full_address = Runtime::bech32_encode_address(address.clone());
                 let address_split: Vec<&str> = full_address.split("1").collect();
                 let mut id = String::from("");
@@ -677,8 +678,6 @@ mod dexter_claim_component {
                     id = address_split[1].to_string();
                 }
                 id
-            } else {
-                address.to_hex()
             }
         }
     }
